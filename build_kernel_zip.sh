@@ -107,8 +107,8 @@ fi
 # KernelSU-Next lives in the "KernelSU-Next" submodule.
 # ReSukiSU lives in the "KernelSU" submodule.
 #
-# Both root solutions use the latest tag returned by:
-#   cd <submodule> && git tag -l
+# ReSukiSU uses its latest version-sorted tag.
+# KernelSU-Next uses its latest version-sorted tag ending in "-legacy".
 #
 # The branch name is also used to determine whether SUSFS is enabled.
 ROOT_SOLUTION="none"
@@ -150,34 +150,158 @@ case "$CURRENT_BRANCH" in
         ;;
 esac
 
-# Detect root solution version from submodule tags.
+# ─── Root solution submodule management ──────────────────────────────────────
 #
-# The requested behavior is equivalent to:
-#   cd KernelSU
-#   git tag -l
+# Fresh clone:
+#   1. Initialize the root solution submodule.
+#   2. Fetch the latest tags from the root solution's upstream.
+#   3. Select the latest suitable tag.
+#   4. Check out that tag instead of the commit pinned by the kernel repository.
 #
-# and using the latest tag listed by git as the displayed version.
-if [[ "$ROOT_SOLUTION" != "none" ]]; then
+# Existing clone:
+#   Leave an initialized root solution checkout alone until it is explicitly
+#   fetched and moved to the latest suitable upstream tag below.
+#
+# ReSukiSU:
+#   latest tag in the ReSukiSU repository.
+#
+# KernelSU-Next:
+#   latest tag whose name ends in "-legacy".
+#
+update_non_root_submodules() {
+    # Keep other kernel submodules initialized/updated without touching the
+    # selected root-solution submodule. This prevents KernelSU/ or
+    # KernelSU-Next/ from being moved back to the commit pinned by the
+    # superproject before we select its latest upstream tag.
+    [[ -f "${KERNEL_ROOT}/.gitmodules" ]] || return 0
+
+    local root_rel=""
+    if [[ "$ROOT_SOLUTION" != "none" ]]; then
+        root_rel="${ROOT_SUBMODULE_DIR#"${KERNEL_ROOT}/"}"
+    fi
+
+    mapfile -t SUBMODULE_PATHS < <(
+        git -C "${KERNEL_ROOT}" config --file .gitmodules --get-regexp '^submodule\..*\.path$' \
+            | sed 's/^[^[:space:]]*[[:space:]]*//'
+    )
+
+    for submodule_path in "${SUBMODULE_PATHS[@]}"; do
+        [[ -n "$submodule_path" ]] || continue
+        [[ "$submodule_path" == "$root_rel" ]] && continue
+
+        info "Updating submodule ${submodule_path}..."
+        git -C "${KERNEL_ROOT}" submodule update --init --recursive -- \
+            "$submodule_path" \
+            || die "Failed to initialize/update submodule: ${submodule_path}"
+    done
+}
+
+update_root_submodule() {
+    [[ "$ROOT_SOLUTION" != "none" ]] || return 0
+
+    local submodule_rel
+    local tag_pattern
+    local tag
+
+    submodule_rel="${ROOT_SUBMODULE_DIR#"${KERNEL_ROOT}/"}"
+
+    # Only initialize the root submodule when it is not already a Git checkout.
+    # This is important: a generic `git submodule update` would move an
+    # already-initialized KernelSU checkout back to the commit pinned by the
+    # kernel repository before we get a chance to select the latest tag.
+    if ! git -C "$ROOT_SUBMODULE_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+        info "Initializing ${ROOT_SOLUTION} submodule..."
+        git -C "${KERNEL_ROOT}" submodule update --init --recursive -- \
+            "$submodule_rel" \
+            || die "Failed to initialize ${ROOT_SOLUTION} submodule"
+    else
+        info "${ROOT_SOLUTION} submodule already initialized"
+    fi
+
     [[ -d "$ROOT_SUBMODULE_DIR" ]] \
         || die "${ROOT_SOLUTION} submodule directory not found: ${ROOT_SUBMODULE_DIR}"
 
-    mapfile -t ROOT_TAGS < <(git -C "$ROOT_SUBMODULE_DIR" tag -l)
+    # Fetch tags from the submodule's configured origin without changing the
+    # current checkout yet.
+    info "Fetching ${ROOT_SOLUTION} tags from origin..."
+    git -C "$ROOT_SUBMODULE_DIR" fetch --tags --force origin \
+        || die "Failed to fetch ${ROOT_SOLUTION} tags"
 
-    if (( ${#ROOT_TAGS[@]} == 0 )); then
-        ROOT_VERSION="unknown"
-        warn "No tags found in ${ROOT_SOLUTION} submodule"
-    else
-        ROOT_VERSION="${ROOT_TAGS[$((${#ROOT_TAGS[@]} - 1))]}"
+    case "$ROOT_SOLUTION" in
+        ReSukiSU)
+            tag_pattern='*'
+            ;;
+
+        KernelSU-Next)
+            tag_pattern='*-legacy'
+            ;;
+
+        *)
+            die "Unsupported root solution: ${ROOT_SOLUTION}"
+            ;;
+    esac
+
+    # Sort using Git's version-aware tag sorting so v3.10.0 sorts after v3.9.0.
+    mapfile -t ROOT_TAGS < <(
+        git -C "$ROOT_SUBMODULE_DIR" tag --list "$tag_pattern" --sort=-v:refname
+    )
+
+    (( ${#ROOT_TAGS[@]} > 0 )) \
+        || die "No suitable tags found for ${ROOT_SOLUTION}"
+
+    tag="${ROOT_TAGS[0]}"
+
+    # Do not silently destroy unrelated local modifications in the submodule.
+    # The build script intentionally moves the root solution to the selected
+    # release tag, so a dirty checkout is considered an error instead.
+    if ! git -C "$ROOT_SUBMODULE_DIR" diff --quiet ||
+       ! git -C "$ROOT_SUBMODULE_DIR" diff --cached --quiet; then
+        die "${ROOT_SOLUTION} submodule has uncommitted changes — commit/stash them before building"
     fi
 
+    info "Checking out ${ROOT_SOLUTION} ${tag}..."
+    git -C "$ROOT_SUBMODULE_DIR" checkout --detach "$tag" \
+        || die "Failed to checkout ${ROOT_SOLUTION} ${tag}"
+
+    # In case the selected tag itself references nested submodules, initialize
+    # them according to that tagged tree as well.
+    git -C "$ROOT_SUBMODULE_DIR" submodule update --init --recursive \
+        || die "Failed to initialize nested ${ROOT_SOLUTION} submodules"
+
+    ROOT_VERSION="$tag"
     ROOT_DISPLAY="${ROOT_SOLUTION} ${ROOT_VERSION}"
 
     if [[ "$HAS_SUSFS" == true ]]; then
         ROOT_DISPLAY+=" + SUSFS"
     fi
+
+    success "${ROOT_DISPLAY} selected"
+}
+
+# ─── Sanity checks ────────────────────────────────────────────────────────────
+[[ "$(basename "$KERNEL_ROOT")" == "android_kernel_samsung_sm7325_a52s_5g" ]] \
+    || die "Run this script from the kernel root (android_kernel_samsung_sm7325_a52s_5g/)"
+
+for cmd in curl unzip zip cpio find sed git uname tar grep nproc cp chmod depmod python3; do
+    command -v "$cmd" &>/dev/null || die "Required command not found: $cmd"
+done
+
+# Make sure the kernel root itself is a Git repository before touching submodules.
+git -C "${KERNEL_ROOT}" rev-parse --git-dir >/dev/null 2>&1 \
+    || die "Kernel root is not a git repository"
+
+# ─── Step 1: Git submodules / root solution ───────────────────────────────────
+# Initialize/update every ordinary submodule first, while deliberately
+# excluding the root-solution submodule when one is selected.
+update_non_root_submodules
+
+if [[ "$ROOT_SOLUTION" != "none" ]]; then
+    update_root_submodule
+else
+    success "Submodules up to date"
 fi
 
-# ZIP name
+# ZIP name — ROOT_VERSION is now known for root-enabled branches.
 if [[ "$ROOT_SOLUTION" == "none" ]]; then
     ZIP_NAME="${AUTHOR}_${BUILD_DATE}_${ROM_TYPE}_${DEVICE}.zip"
 else
@@ -189,14 +313,6 @@ else
         ZIP_NAME="${AUTHOR}_${BUILD_DATE}_${ROM_TYPE}_${ZIP_ROOT_NAME}-${ROOT_VERSION}_${DEVICE}.zip"
     fi
 fi
-
-# ─── Sanity checks ────────────────────────────────────────────────────────────
-[[ "$(basename "$KERNEL_ROOT")" == "android_kernel_samsung_sm7325_a52s_5g" ]] \
-    || die "Run this script from the kernel root (android_kernel_samsung_sm7325_a52s_5g/)"
-
-for cmd in curl unzip zip cpio find sed git uname tar grep nproc cp chmod depmod python3; do
-    command -v "$cmd" &>/dev/null || die "Required command not found: $cmd"
-done
 
 # ─── Pre-flight checks ────────────────────────────────────────────────────────
 info "Running pre-flight checks..."
@@ -256,14 +372,6 @@ done
 
 (( PREFLIGHT_FAILED == 0 )) || die "Pre-flight checks failed — fix the above before building"
 success "Pre-flight checks passed"
-
-# ─── Step 1: Git submodules ───────────────────────────────────────────────────
-git -C "${KERNEL_ROOT}" rev-parse --git-dir >/dev/null 2>&1 \
-    || die "Kernel root is not a git repository"
-
-info "Updating git submodules..."
-git -C "${KERNEL_ROOT}" submodule update --init --recursive
-success "Submodules up to date"
 
 # ─── Step 2: Clang toolchain ──────────────────────────────────────────────────
 if [[ -x "${CLANG_DIR}/bin/clang" ]] &&
@@ -529,7 +637,7 @@ success "dtbo.img placed in staging dir"
 
 # ─── Step 14: vendor_boot.img ────────────────────────────────────────────────
 info "Repacking vendor_boot.img..."
-cd "${TMP_VENDOR_BOOT}" || die "Failed to cd into vendor_boot working dir"
+cd "${TMP_VENDOR_BOOT}" || die "Failed to cd into vendor boot working dir"
 rm -f dtb header ramdisk.cpio new-boot.img
 rm -rf ramdisk
 
@@ -602,7 +710,7 @@ rm -rf ramdisk/
 
 magiskboot repack vendor_boot.img || die "magiskboot repack vendor_boot.img failed"
 cp new-boot.img "${TMP_ZIP_STAGING}/images/vendor_boot.img" \
-    || die "new-boot.img not found after vendor_boot repack"
+    || die "new-boot.img not found after vendor boot repack"
 rm -f dtb header ramdisk.cpio new-boot.img
 cd "${KERNEL_ROOT}"
 success "vendor_boot.img repacked"
