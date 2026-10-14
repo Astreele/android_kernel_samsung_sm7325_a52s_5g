@@ -41,6 +41,11 @@ typedef struct wait_queue_head wait_queue_head_t;
 
 struct task_struct;
 
+bool try_invoke_on_locked_down_task(struct task_struct *p,
+				    bool (*func)(struct task_struct *t,
+						 void *arg),
+				    void *arg);
+
 /*
  * Macros for declaration and initialisaton of the datatypes
  */

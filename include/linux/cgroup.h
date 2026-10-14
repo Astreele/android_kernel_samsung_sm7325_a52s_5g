@@ -308,6 +308,11 @@ void css_task_iter_end(struct css_task_iter *it);
  * Inline functions.
  */
 
+static inline u64 cgroup_id(struct cgroup *cgrp)
+{
+	return cgrp->kn->id.id;
+}
+
 /**
  * css_get - obtain a reference on the specified css
  * @css: target css
@@ -716,6 +721,7 @@ void cgroup_path_from_kernfs_id(const union kernfs_node_id *id,
 struct cgroup_subsys_state;
 struct cgroup;
 
+static inline u64 cgroup_id(struct cgroup *cgrp) { return 1; }
 static inline void css_get(struct cgroup_subsys_state *css) {}
 static inline void css_put(struct cgroup_subsys_state *css) {}
 static inline void cgroup_lock(void) {}

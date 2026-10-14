@@ -16,6 +16,7 @@
 #include <linux/bpf.h>
 #include <linux/bpf_verifier.h>
 #include <linux/bug.h>
+#include <linux/err.h>
 #include <linux/kdev_t.h>
 #include <linux/list.h>
 #include <linux/lockdep.h>
@@ -307,9 +308,10 @@ int bpf_prog_offload_info_fill(struct bpf_prog_info *info,
 
 	res = ns_get_path_cb(&ns_path, bpf_prog_offload_info_fill_ns, &args);
 	if (IS_ERR(res)) {
+		int err = PTR_ERR(res);
 		if (!info->ifindex)
 			return -ENODEV;
-		return PTR_ERR(res);
+		return err;
 	}
 
 	down_read(&bpf_devs_lock);
@@ -530,9 +532,10 @@ int bpf_map_offload_info_fill(struct bpf_map_info *info, struct bpf_map *map)
 
 	res = ns_get_path_cb(&ns_path, bpf_map_offload_info_fill_ns, &args);
 	if (IS_ERR(res)) {
+		int err = PTR_ERR(res);
 		if (!info->ifindex)
 			return -ENODEV;
-		return PTR_ERR(res);
+		return err;
 	}
 
 	ns_inode = ns_path.dentry->d_inode;

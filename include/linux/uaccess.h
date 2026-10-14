@@ -358,6 +358,31 @@ extern long strncpy_from_unsafe_user(char *dst, const void __user *unsafe_addr,
 				     long count);
 extern long strnlen_unsafe_user(const void __user *unsafe_addr, long count);
 
+bool copy_from_kernel_nofault_allowed(const void *unsafe_src, size_t size);
+
+long copy_from_kernel_nofault(void *dst, const void *src, size_t size);
+long notrace copy_to_kernel_nofault(void *dst, const void *src, size_t size);
+
+long copy_from_user_nofault(void *dst, const void __user *src, size_t size);
+long notrace copy_to_user_nofault(void __user *dst, const void *src,
+		size_t size);
+
+long strncpy_from_kernel_nofault(char *dst, const void *unsafe_addr,
+		long count);
+
+long strncpy_from_user_nofault(char *dst, const void __user *unsafe_addr,
+		long count);
+
+/**
+ * get_kernel_nofault(): safely attempt to read from a location
+ * @val: read into this variable
+ * @ptr: address to read from
+ *
+ * Returns 0 on success, or -EFAULT.
+ */
+#define get_kernel_nofault(val, ptr)		\
+	copy_from_kernel_nofault(&(val), (ptr), sizeof(val))
+
 /**
  * probe_kernel_address(): safely attempt to read from a location
  * @addr: address to read from
