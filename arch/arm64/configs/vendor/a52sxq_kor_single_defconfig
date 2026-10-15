@@ -30,8 +30,8 @@ CONFIG_LOCALVERSION="-bone-machine-qgki"
 CONFIG_BUILD_SALT=""
 CONFIG_DEFAULT_HOSTNAME="(none)"
 CONFIG_SWAP=y
-# CONFIG_SYSVIPC is not set
-# CONFIG_POSIX_MQUEUE is not set
+CONFIG_SYSVIPC=y
+CONFIG_POSIX_MQUEUE=y
 CONFIG_CROSS_MEMORY_ATTACH=y
 # CONFIG_USELIB is not set
 CONFIG_AUDIT=y
@@ -149,15 +149,15 @@ CONFIG_MEMCG_KMEM=y
 CONFIG_BLK_CGROUP=y
 CONFIG_CGROUP_WRITEBACK=y
 CONFIG_CGROUP_SCHED=y
-# CONFIG_FAIR_GROUP_SCHED is not set
+CONFIG_FAIR_GROUP_SCHED=y
 # CONFIG_RT_GROUP_SCHED is not set
 CONFIG_UCLAMP_TASK_GROUP=y
-# CONFIG_CGROUP_PIDS is not set
+CONFIG_CGROUP_PIDS=y
 # CONFIG_CGROUP_RDMA is not set
 CONFIG_CGROUP_FREEZER=y
 CONFIG_CPUSETS=y
 CONFIG_PROC_PID_CPUSET=y
-# CONFIG_CGROUP_DEVICE is not set
+CONFIG_CGROUP_DEVICE=y
 CONFIG_CGROUP_CPUACCT=y
 # CONFIG_CGROUP_PERF is not set
 CONFIG_CGROUP_BPF=y
@@ -165,8 +165,8 @@ CONFIG_CGROUP_BPF=y
 CONFIG_SOCK_CGROUP_DATA=y
 CONFIG_NAMESPACES=y
 CONFIG_UTS_NS=y
-# CONFIG_USER_NS is not set
-# CONFIG_PID_NS is not set
+CONFIG_USER_NS=y
+CONFIG_PID_NS=y
 CONFIG_NET_NS=y
 # CONFIG_CHECKPOINT_RESTORE is not set
 # CONFIG_SCHED_AUTOGROUP is not set
@@ -1017,7 +1017,7 @@ CONFIG_NETWORK_SECMARK=y
 # CONFIG_NETWORK_PHY_TIMESTAMPING is not set
 CONFIG_NETFILTER=y
 CONFIG_NETFILTER_ADVANCED=y
-# CONFIG_BRIDGE_NETFILTER is not set
+CONFIG_BRIDGE_NETFILTER=y
 
 #
 # Core Netfilter Configuration
@@ -1066,7 +1066,7 @@ CONFIG_NF_NAT_IRC=y
 CONFIG_NF_NAT_TFTP=y
 CONFIG_NF_NAT_REDIRECT=y
 CONFIG_NF_NAT_MASQUERADE=y
-# CONFIG_NF_TABLES is not set
+CONFIG_NF_TABLES=y
 CONFIG_NETFILTER_XTABLES=y
 
 #
@@ -1109,7 +1109,7 @@ CONFIG_NETFILTER_XT_TARGET_TCPMSS=y
 #
 # Xtables matches
 #
-# CONFIG_NETFILTER_XT_MATCH_ADDRTYPE is not set
+CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
 CONFIG_NETFILTER_XT_MATCH_BPF=y
 # CONFIG_NETFILTER_XT_MATCH_CGROUP is not set
 # CONFIG_NETFILTER_XT_MATCH_CLUSTER is not set
@@ -1146,7 +1146,7 @@ CONFIG_NETFILTER_XT_MATCH_QUOTA2=y
 CONFIG_NETFILTER_XT_MATCH_QUOTA2_LOG=y
 # CONFIG_NETFILTER_XT_MATCH_RATEEST is not set
 # CONFIG_NETFILTER_XT_MATCH_REALM is not set
-# CONFIG_NETFILTER_XT_MATCH_RECENT is not set
+CONFIG_NETFILTER_XT_MATCH_RECENT=y
 # CONFIG_NETFILTER_XT_MATCH_SCTP is not set
 CONFIG_NETFILTER_XT_MATCH_SOCKET=y
 CONFIG_NETFILTER_XT_MATCH_STATE=y
@@ -1157,7 +1157,7 @@ CONFIG_NETFILTER_XT_MATCH_TIME=y
 CONFIG_NETFILTER_XT_MATCH_U32=y
 # end of Core Netfilter Configuration
 
-# CONFIG_IP_SET is not set
+CONFIG_IP_SET=y
 # CONFIG_IP_VS is not set
 
 #
@@ -1223,7 +1223,7 @@ CONFIG_IP6_NF_TARGET_REJECT=y
 CONFIG_IP6_NF_MANGLE=y
 CONFIG_IP6_NF_RAW=y
 # CONFIG_IP6_NF_SECURITY is not set
-# CONFIG_IP6_NF_NAT is not set
+CONFIG_IP6_NF_NAT=y
 # end of IPv6: Netfilter Configuration
 
 CONFIG_NF_DEFRAG_IPV6=y
@@ -1381,7 +1381,7 @@ CONFIG_QRTR_HAVEN=y
 CONFIG_RPS=y
 CONFIG_RFS_ACCEL=y
 CONFIG_XPS=y
-# CONFIG_CGROUP_NET_PRIO is not set
+CONFIG_CGROUP_NET_PRIO=y
 # CONFIG_CGROUP_NET_CLASSID is not set
 CONFIG_NET_RX_BUSY_POLL=y
 CONFIG_BQL=y
@@ -1607,7 +1607,7 @@ CONFIG_SEC_PCIE_L1SS=y
 # Generic Driver Options
 #
 # CONFIG_UEVENT_HELPER is not set
-# CONFIG_DEVTMPFS is not set
+CONFIG_DEVTMPFS=y
 CONFIG_STANDALONE=y
 CONFIG_PREVENT_FIRMWARE_BUILD=y
 
@@ -1619,7 +1619,7 @@ CONFIG_FW_LOADER_PAGED_BUF=y
 CONFIG_EXTRA_FIRMWARE=""
 CONFIG_FW_LOADER_USER_HELPER=y
 CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y
-# CONFIG_FW_LOADER_COMPRESS is not set
+CONFIG_FW_LOADER_COMPRESS=y
 # CONFIG_FW_CACHE is not set
 # end of Firmware loader
 
@@ -1986,7 +1986,7 @@ CONFIG_DUMMY=y
 # CONFIG_NET_FC is not set
 # CONFIG_IFB is not set
 # CONFIG_NET_TEAM is not set
-# CONFIG_MACVLAN is not set
+CONFIG_MACVLAN=y
 # CONFIG_IPVLAN is not set
 # CONFIG_VXLAN is not set
 # CONFIG_GENEVE is not set
@@ -6603,7 +6603,7 @@ CONFIG_PROC_DLOG=y
 CONFIG_KERNFS=y
 CONFIG_SYSFS=y
 CONFIG_TMPFS=y
-# CONFIG_TMPFS_POSIX_ACL is not set
+CONFIG_TMPFS_POSIX_ACL=y
 CONFIG_TMPFS_XATTR=y
 # CONFIG_HUGETLBFS is not set
 CONFIG_MEMFD_CREATE=y
@@ -7467,3 +7467,50 @@ CONFIG_DISPLAY_SAMSUNG=y
 # CONFIG_PARTIAL_UPDATE is not set
 # CONFIG_CABC_FUNCTION is not set
 # CONFIG_SUPPORT_POC_FLASH is not set
+
+#
+# ================= DroidSpaces container support =================
+# Flags from:
+# https://github.com/ravindu644/Droidspaces-OSS/blob/main/Documentation/Kernel-Configuration.md
+# (non-GKI section)
+#
+# This tree is Samsung's 5.4 kernel: every module is built from this
+# source and flashed together with the kernel (build_kernel_zip.sh
+# replaces all lib/modules/*.ko in the vendor_boot ramdisk), so no
+# prebuilt vendor module survives a flash and the GKI kABI patches
+# are NOT needed here.
+#
+# Options from the doc that this defconfig already had set to =y were
+# left untouched. These were flipped from "is not set" to =y in place
+# (search the symbol name):
+#   SYSVIPC, POSIX_MQUEUE, PID_NS, CGROUP_DEVICE, FAIR_GROUP_SCHED,
+#   CGROUP_NET_PRIO, CGROUP_PIDS, DEVTMPFS, TMPFS_POSIX_ACL,
+#   FW_LOADER_COMPRESS, BRIDGE_NETFILTER, NF_TABLES,
+#   NETFILTER_XT_MATCH_ADDRTYPE, IP6_NF_NAT, MACVLAN, USER_NS,
+#   NETFILTER_XT_MATCH_RECENT, IP_SET
+#
+# CFS_BANDWIDTH (the --cpus limit) cannot be enabled while
+# CONFIG_SCHED_WALT=y (init/Kconfig: depends on FAIR_GROUP_SCHED &&
+# !SCHED_WALT); left off to preserve Qualcomm's WALT scheduler, so
+# Droidspaces skips --cpus with a warning.
+#
+# Doc entries not applicable to this 5.4 tree:
+#  - CONFIG_ANDROID_PARANOID_NETWORK: symbol does not exist
+#  - CONFIG_NF_CONNTRACK_IPV4 / CONFIG_NF_NAT_IPV4: pre-4.18 legacy names
+#  - CONFIG_NETFILTER_XT_TARGET_REJECT: REJECT is built by
+#    CONFIG_IP_NF_TARGET_REJECT (already enabled)
+#  - CONFIG_IP_NF_TARGET_ULOG: removed from the kernel
+#
+# Verify after flashing: Droidspaces app -> Settings -> Requirements
+#
+
+# Core namespace support
+CONFIG_IPC_NS=y
+
+# IPv6 in NAT mode (NAT66). Optional: without this, NAT is IPv4 only
+CONFIG_IP6_NF_TARGET_MASQUERADE=y
+
+# Fail2ban support (ipset backend)
+CONFIG_IP_SET_HASH_IP=y
+CONFIG_IP_SET_HASH_NET=y
+CONFIG_NETFILTER_XT_SET=y
