@@ -149,15 +149,15 @@ CONFIG_MEMCG_KMEM=y
 CONFIG_BLK_CGROUP=y
 CONFIG_CGROUP_WRITEBACK=y
 CONFIG_CGROUP_SCHED=y
-CONFIG_FAIR_GROUP_SCHED=y
+# CONFIG_FAIR_GROUP_SCHED is not set
 # CONFIG_RT_GROUP_SCHED is not set
 CONFIG_UCLAMP_TASK_GROUP=y
-CONFIG_CGROUP_PIDS=y
+# CONFIG_CGROUP_PIDS is not set
 # CONFIG_CGROUP_RDMA is not set
 CONFIG_CGROUP_FREEZER=y
 CONFIG_CPUSETS=y
 CONFIG_PROC_PID_CPUSET=y
-CONFIG_CGROUP_DEVICE=y
+# CONFIG_CGROUP_DEVICE is not set
 CONFIG_CGROUP_CPUACCT=y
 # CONFIG_CGROUP_PERF is not set
 CONFIG_CGROUP_BPF=y
@@ -1017,7 +1017,7 @@ CONFIG_NETWORK_SECMARK=y
 # CONFIG_NETWORK_PHY_TIMESTAMPING is not set
 CONFIG_NETFILTER=y
 CONFIG_NETFILTER_ADVANCED=y
-CONFIG_BRIDGE_NETFILTER=y
+# CONFIG_BRIDGE_NETFILTER is not set
 
 #
 # Core Netfilter Configuration
@@ -1066,7 +1066,7 @@ CONFIG_NF_NAT_IRC=y
 CONFIG_NF_NAT_TFTP=y
 CONFIG_NF_NAT_REDIRECT=y
 CONFIG_NF_NAT_MASQUERADE=y
-CONFIG_NF_TABLES=y
+# CONFIG_NF_TABLES is not set
 CONFIG_NETFILTER_XTABLES=y
 
 #
@@ -1381,7 +1381,7 @@ CONFIG_QRTR_HAVEN=y
 CONFIG_RPS=y
 CONFIG_RFS_ACCEL=y
 CONFIG_XPS=y
-CONFIG_CGROUP_NET_PRIO=y
+# CONFIG_CGROUP_NET_PRIO is not set
 # CONFIG_CGROUP_NET_CLASSID is not set
 CONFIG_NET_RX_BUSY_POLL=y
 CONFIG_BQL=y
@@ -1619,7 +1619,7 @@ CONFIG_FW_LOADER_PAGED_BUF=y
 CONFIG_EXTRA_FIRMWARE=""
 CONFIG_FW_LOADER_USER_HELPER=y
 CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y
-CONFIG_FW_LOADER_COMPRESS=y
+# CONFIG_FW_LOADER_COMPRESS is not set
 # CONFIG_FW_CACHE is not set
 # end of Firmware loader
 
@@ -7470,33 +7470,32 @@ CONFIG_DISPLAY_SAMSUNG=y
 
 #
 # ================= DroidSpaces container support =================
-# Flags from:
+# Flags from the GKI section of:
 # https://github.com/ravindu644/Droidspaces-OSS/blob/main/Documentation/Kernel-Configuration.md
-# (non-GKI section)
 #
-# This tree is Samsung's 5.4 kernel: every module is built from this
-# source and flashed together with the kernel (build_kernel_zip.sh
-# replaces all lib/modules/*.ko in the vendor_boot ramdisk), so no
-# prebuilt vendor module survives a flash and the GKI kABI patches
-# are NOT needed here.
+# Strict GKI compliance: only the options the GKI section lists are
+# enabled (plus its mandatory Step 1 kABI padding, applied to
+# include/linux/sched.h and include/linux/sched/user.h in a separate
+# commit). Per the guide, nothing beyond that list is turned on.
 #
-# Options from the doc that this defconfig already had set to =y were
+# Options from the guide that this defconfig already had set to =y were
 # left untouched. These were flipped from "is not set" to =y in place
 # (search the symbol name):
-#   SYSVIPC, POSIX_MQUEUE, PID_NS, CGROUP_DEVICE, FAIR_GROUP_SCHED,
-#   CGROUP_NET_PRIO, CGROUP_PIDS, DEVTMPFS, TMPFS_POSIX_ACL,
-#   FW_LOADER_COMPRESS, BRIDGE_NETFILTER, NF_TABLES,
+#   SYSVIPC, POSIX_MQUEUE, PID_NS, DEVTMPFS, TMPFS_POSIX_ACL,
 #   NETFILTER_XT_MATCH_ADDRTYPE, IP6_NF_NAT, MACVLAN, USER_NS,
 #   NETFILTER_XT_MATCH_RECENT, IP_SET
 #
-# CFS_BANDWIDTH (the --cpus limit) cannot be enabled while
-# CONFIG_SCHED_WALT=y (init/Kconfig: depends on FAIR_GROUP_SCHED &&
-# !SCHED_WALT); left off to preserve Qualcomm's WALT scheduler, so
-# Droidspaces skips --cpus with a warning.
+# Deliberately left off per the GKI guide (commented out there on
+# purpose - no padding patch covers them):
+#   CFS_BANDWIDTH (--cpus limit), CGROUP_PIDS (--pids-limit).
+# Droidspaces skips those two limits with a warning.
 #
-# Doc entries not applicable to this 5.4 tree:
+# Guide entries not applicable to this 5.4 tree:
 #  - CONFIG_ANDROID_PARANOID_NETWORK: symbol does not exist
-#  - CONFIG_NF_CONNTRACK_IPV4 / CONFIG_NF_NAT_IPV4: pre-4.18 legacy names
+#  - CONFIG_NF_CONNTRACK_IPV4 / CONFIG_NF_NAT_IPV4 and
+#    CONFIG_NF_CONNTRACK_IPV6 / CONFIG_NF_NAT_IPV6: pre-4.18 legacy names
+#  - CONFIG_NF_CONNTRACK_NETLINK: 5.4 name is CONFIG_NF_CT_NETLINK
+#    (already enabled)
 #  - CONFIG_NETFILTER_XT_TARGET_REJECT: REJECT is built by
 #    CONFIG_IP_NF_TARGET_REJECT (already enabled)
 #  - CONFIG_IP_NF_TARGET_ULOG: removed from the kernel
