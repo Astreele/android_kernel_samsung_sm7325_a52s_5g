@@ -1,0 +1,125 @@
+name: Build kernel (a52sxq)
+
+# Builds the resukisu-susfs-oneui branch (Samsung 5.4.289, One UI,
+# ReSukiSU v4.2.0-rc3 + SUSFS) with build_kernel_zip.sh and uploads the
+# flashable zip. Pushing a v* tag additionally attaches the zip to a
+# GitHub release.
+#
+# Design notes:
+# - actions/checkout leaves a detached HEAD, but build_kernel_zip.sh derives
+#   ROM_TYPE (One-UI vs AOSP) and the root solution from the branch name,
+#   so we re-attach the branch name before building.
+# - The Clang toolchain (~GBs) is cached between runs; the script itself
+#   skips the download when a working toolchain is present.
+# - The defconfig resolves silently (verified: olddefconfig reports
+#   "No change"), so the build never blocks on a Kconfig prompt.
+
+"on":
+  push:
+    branches:
+      - resukisu-susfs-oneui
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  KERNEL_DIR: android_kernel_samsung_sm7325_a52s_5g
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.KERNEL_DIR }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Attach branch name (ROM/root detection)
+        run: |
+          cd "${{ env.KERNEL_DIR }}"
+          BRANCH="${{ github.ref_name }}"
+          case "$BRANCH" in
+            v*) BRANCH="resukisu-susfs-oneui" ;;  # tags are cut from the One UI branch
+          esac
+          git checkout -B "$BRANCH"
+          git submodule update --init --recursive
+          # build_kernel_zip.sh reads the root version from submodule tags
+          git -C KernelSU fetch --tags origin || true
+          echo "Building on branch: $(git rev-parse --abbrev-ref HEAD)"
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost 2>/dev/null || true
+          sudo apt-get clean
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl git make binutils binutils-aarch64-linux-gnu bc bison flex python3 \
+            zip unzip cpio tar findutils sed grep coreutils kmod libssl-dev
+
+      - name: Restore cached Clang toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_DIR }}/toolchain/clang
+          key: clang-r530567-${{ runner.os }}
+          restore-keys: |
+            clang-r530567-
+
+      - name: Build kernel + flashable zip
+        working-directory: ${{ env.KERNEL_DIR }}
+        run: |
+          bash ./build_kernel_zip.sh
+
+      - name: Verify output zip
+        id: zip
+        run: |
+          cd "${{ env.KERNEL_DIR }}"
+          ZIP="$(ls -1 bone-machine_*_a52sxq.zip | head -n 1)"
+          echo "ZIP_NAME=${ZIP}" >> "$GITHUB_OUTPUT"
+          ls -la "$ZIP"
+          unzip -l "$ZIP" | grep -E 'images/(boot|vendor_boot|dtbo)\.img'
+
+      - name: Upload flashable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ github.ref_name }}-${{ github.sha }}
+          path: ${{ env.KERNEL_DIR }}/${{ steps.zip.outputs.ZIP_NAME }}
+          retention-days: 14
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Download zip artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: kernel-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          ls -la dist/
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "$TAG" \
+              --notes "Automated kernel build for a52sxq from ${{ github.sha }}."
+          gh release upload "$TAG" dist/*.zip --clobber
