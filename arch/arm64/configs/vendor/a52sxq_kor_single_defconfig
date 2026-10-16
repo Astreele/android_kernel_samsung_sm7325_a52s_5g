@@ -152,12 +152,12 @@ CONFIG_CGROUP_SCHED=y
 # CONFIG_FAIR_GROUP_SCHED is not set
 # CONFIG_RT_GROUP_SCHED is not set
 CONFIG_UCLAMP_TASK_GROUP=y
-# CONFIG_CGROUP_PIDS is not set
+CONFIG_CGROUP_PIDS=y
 # CONFIG_CGROUP_RDMA is not set
 CONFIG_CGROUP_FREEZER=y
 CONFIG_CPUSETS=y
 CONFIG_PROC_PID_CPUSET=y
-# CONFIG_CGROUP_DEVICE is not set
+CONFIG_CGROUP_DEVICE=y
 CONFIG_CGROUP_CPUACCT=y
 # CONFIG_CGROUP_PERF is not set
 CONFIG_CGROUP_BPF=y
@@ -1619,7 +1619,7 @@ CONFIG_FW_LOADER_PAGED_BUF=y
 CONFIG_EXTRA_FIRMWARE=""
 CONFIG_FW_LOADER_USER_HELPER=y
 CONFIG_FW_LOADER_USER_HELPER_FALLBACK=y
-# CONFIG_FW_LOADER_COMPRESS is not set
+CONFIG_FW_LOADER_COMPRESS=y
 # CONFIG_FW_CACHE is not set
 # end of Firmware loader
 
@@ -7485,10 +7485,22 @@ CONFIG_DISPLAY_SAMSUNG=y
 #   NETFILTER_XT_MATCH_ADDRTYPE, IP6_NF_NAT, MACVLAN, USER_NS,
 #   NETFILTER_XT_MATCH_RECENT, IP_SET
 #
+# Beyond-guide options, kept because they are ABI-safe here (verified in
+# source: no gated fields in any core struct, pure code/subsys additions):
+#   CGROUP_DEVICE (function stubs only), CGROUP_PIDS (subsys registration
+#   only; same-SoC Reno10 Droidspaces kernel runs it), FW_LOADER_COMPRESS
+#   (no header footprint at all).
+#
+# Beyond-guide options, left OFF because they resize core structs
+# (would break vendor-module CRCs - verified in source):
+#   FAIR_GROUP_SCHED (struct task_group fields), CGROUP_NET_PRIO
+#   (struct net_device gains priomap - would break wifi), BRIDGE_NETFILTER
+#   (sk_buff headers), NF_TABLES (struct net gains netns_nftables).
 # Deliberately left off per the GKI guide (commented out there on
 # purpose - no padding patch covers them):
-#   CFS_BANDWIDTH (--cpus limit), CGROUP_PIDS (--pids-limit).
-# Droidspaces skips those two limits with a warning.
+#   CFS_BANDWIDTH (--cpus limit). (CGROUP_PIDS is also listed there, but
+#   kept: see ABI-safe note above.)
+# Droidspaces skips --cpus with a warning; --pids-limit works.
 #
 # Guide entries not applicable to this 5.4 tree:
 #  - CONFIG_ANDROID_PARANOID_NETWORK: symbol does not exist
