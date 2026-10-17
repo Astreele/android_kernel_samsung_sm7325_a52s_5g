@@ -528,4 +528,7 @@ config NET_FAILOVER
 	  a VM with direct attached VF by failing over to the paravirtual
 	  datapath when the VF is unplugged.
 
+# WireGuard from wireguard-linux-compat source: drivers/net/wireguard
+source "drivers/net/wireguard/Kconfig"
+
 endif # NETDEVICES
