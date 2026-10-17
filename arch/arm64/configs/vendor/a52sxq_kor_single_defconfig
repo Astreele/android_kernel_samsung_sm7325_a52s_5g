@@ -7529,3 +7529,12 @@ CONFIG_NETFILTER_XT_SET=y
 CONFIG_TCP_CONG_BBR=y
 CONFIG_DEFAULT_BBR=y
 
+
+#
+# ================= WireGuard (kernel-space VPN) =================
+# Official wireguard-linux-compat backport (1.0.20220627), drivers/
+# integration under drivers/net/wireguard/. Built-in so tunnel creation
+# is instant, module-load-free and available to Droidspaces containers
+# (each netns can create its own wg0).
+# Off by default: no interface exists until you create one.
+CONFIG_WIREGUARD=y
