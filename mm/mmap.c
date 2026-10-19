@@ -630,6 +630,17 @@ inline int vma_expand(struct ma_state *mas, struct vm_area_struct *vma,
 	/* Note: mas must be pointing to the expanding VMA */
 	vma_mas_store(vma, mas);
 
+#ifdef CONFIG_SPECULATIVE_PAGE_FAULT
+	/*
+	 * Ensure the removal is complete before clearing the node.
+	 * Matched by vma_has_changed()/handle_speculative_fault().
+	 */
+	if (remove_next) {
+		smp_wmb();
+		RB_CLEAR_NODE(&next->vm_rb);
+	}
+#endif
+
 	if (file) {
 		vma_interval_tree_insert(vma, root);
 		flush_dcache_mmap_unlock(mapping);
@@ -651,6 +662,15 @@ inline int vma_expand(struct ma_state *mas, struct vm_area_struct *vma,
 	}
 
 	if (remove_next) {
+again:
+#ifdef CONFIG_SPECULATIVE_PAGE_FAULT
+		/*
+		 * Ensure the removal is complete before clearing the
+		 * node.  Matched by vma_has_changed()/handle_speculative_fault().
+		 */
+		smp_wmb();
+		RB_CLEAR_NODE(&next->vm_rb);
+#endif
 		if (file) {
 			uprobe_munmap(next, next->vm_start, next->vm_end);
 			fput(file);
@@ -2575,6 +2595,20 @@ do_mas_align_munmap(struct ma_state *mas, struct vm_area_struct *vma,
 	}
 #endif
 	mas_store_prealloc(mas, NULL);
+#ifdef CONFIG_SPECULATIVE_PAGE_FAULT
+	{
+		struct vm_area_struct *cur_vma;
+
+		/*
+		 * Ensure the removal is complete before clearing the nodes.
+		 * Matched by vma_has_changed()/handle_speculative_fault().
+		 */
+		smp_wmb();
+		mas_set(&mas_detach, start);
+		mas_for_each(&mas_detach, cur_vma, end - 1)
+			RB_CLEAR_NODE(&cur_vma->vm_rb);
+	}
+#endif
 	mm->map_count -= count;
 	/*
 	 * Do not downgrade mmap_sem if we are next to VM_GROWSDOWN or

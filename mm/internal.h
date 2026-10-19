@@ -49,7 +49,7 @@ static inline bool vma_has_changed(struct vm_fault *vmf)
 
 	/*
 	 * Matches both the wmb in write_seqlock_{begin,end}() and
-	 * the wmb in __vma_unlink_list().
+	 * the wmb before the SPF linked-state marker clear on unlink.
 	 */
 	smp_rmb();
 
@@ -309,10 +309,6 @@ static inline bool is_data_mapping(vm_flags_t flags)
 {
 	return (flags & (VM_WRITE | VM_SHARED | VM_STACK)) == VM_WRITE;
 }
-
-/* mm/util.c */
-void __vma_link_list(struct mm_struct *mm, struct vm_area_struct *vma,
-		struct vm_area_struct *prev, struct rb_node *rb_parent);
 
 #ifdef CONFIG_MMU
 extern long populate_vma_page_range(struct vm_area_struct *vma,
