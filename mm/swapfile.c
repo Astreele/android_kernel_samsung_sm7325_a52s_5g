@@ -2089,16 +2089,18 @@ static int unuse_mm(struct mm_struct *mm, unsigned int type,
 		    bool frontswap, unsigned long *fs_pages_to_unuse)
 {
 	struct vm_area_struct *vma;
+	VMA_ITERATOR(vmi, mm, 0);
 	int ret = 0;
 
 	down_read(&mm->mmap_sem);
-	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+	for_each_vma(vmi, vma) {
 		if (vma->anon_vma && !is_vm_hugetlb_page(vma)) {
 			ret = unuse_vma(vma, type, frontswap,
 					fs_pages_to_unuse);
 			if (ret)
 				break;
 		}
+
 		cond_resched();
 	}
 	up_read(&mm->mmap_sem);
