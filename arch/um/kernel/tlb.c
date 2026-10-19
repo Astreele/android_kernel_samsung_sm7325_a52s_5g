@@ -586,21 +586,17 @@ void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 
 void flush_tlb_mm(struct mm_struct *mm)
 {
-	struct vm_area_struct *vma = mm->mmap;
+	struct vm_area_struct *vma;
 
-	while (vma != NULL) {
+	for (vma = find_vma(mm, 0); vma; vma = find_vma(mm, vma->vm_end))
 		fix_range(mm, vma->vm_start, vma->vm_end, 0);
-		vma = vma->vm_next;
-	}
 }
 
 void force_flush_all(void)
 {
 	struct mm_struct *mm = current->mm;
-	struct vm_area_struct *vma = mm->mmap;
+	struct vm_area_struct *vma;
 
-	while (vma != NULL) {
+	for (vma = find_vma(mm, 0); vma; vma = find_vma(mm, vma->vm_end))
 		fix_range(mm, vma->vm_start, vma->vm_end, 1);
-		vma = vma->vm_next;
-	}
 }

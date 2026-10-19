@@ -13,7 +13,7 @@
  *	prefault pages in at malloc, or not
  *	protect MPX bounds tables with protection keys?
  *	make sure VMA splitting/merging is working correctly
- *	OOMs can destroy mm->mmap (see exit_mmap()), so make sure it is immune to pkeys
+ *	OOMs can destroy an mm's vmas (see exit_mmap()), so make sure it is immune to pkeys
  *	look for pkey "leaks" where it is still set on a VMA but "freed" back to the kernel
  *	do a plain mprotect() to a mprotect_pkey() area and make sure the pkey sticks
  *

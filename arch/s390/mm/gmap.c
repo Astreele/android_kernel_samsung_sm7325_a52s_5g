@@ -2504,7 +2504,7 @@ static inline void thp_split_mm(struct mm_struct *mm)
 {
 	struct vm_area_struct *vma;
 
-	for (vma = mm->mmap; vma != NULL; vma = vma->vm_next) {
+	for (vma = find_vma(mm, 0); vma != NULL; vma = find_vma(mm, vma->vm_end)) {
 		vma->vm_flags &= ~VM_HUGEPAGE;
 		vma->vm_flags |= VM_NOHUGEPAGE;
 		walk_page_vma(vma, &thp_split_walk_ops, NULL);
@@ -2634,7 +2634,7 @@ int s390_enable_skey(void)
 		goto out_up;
 
 	mm->context.uses_skeys = 1;
-	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+	for (vma = find_vma(mm, 0); vma; vma = find_vma(mm, vma->vm_end)) {
 		if (ksm_madvise(vma, vma->vm_start, vma->vm_end,
 				MADV_UNMERGEABLE, &vma->vm_flags)) {
 			mm->context.uses_skeys = 0;

@@ -114,13 +114,13 @@ static struct GAForensicINFO {
 	.mm_struct_struct_arg_start = offsetof(struct mm_struct, arg_start),
 	.mm_struct_struct_arg_end = offsetof(struct mm_struct, arg_end),
 	.mm_struct_struct_pgd = offsetof(struct mm_struct, pgd),
-	.mm_struct_struct_mmap = offsetof(struct mm_struct, mmap),
+	.mm_struct_struct_mmap = offsetof(struct mm_struct, mm_mt),
 	.vm_area_struct_struct_vm_start
 		= offsetof(struct vm_area_struct, vm_start),
 	.vm_area_struct_struct_vm_end
 		= offsetof(struct vm_area_struct, vm_end),
 	.vm_area_struct_struct_vm_next
-		= offsetof(struct vm_area_struct, vm_next),
+		= offsetof(struct vm_area_struct, vm_start),
 	.vm_area_struct_struct_vm_file
 		= offsetof(struct vm_area_struct, vm_file),
 #ifndef CONFIG_ARM64

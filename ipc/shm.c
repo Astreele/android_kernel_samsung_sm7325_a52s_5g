@@ -359,8 +359,8 @@ static bool shm_may_destroy(struct shmid_kernel *shp)
 /*
  * remove the attach descriptor vma.
  * free memory for segment if it is marked destroyed.
- * The descriptor has already been removed from the current->mm->mmap list
- * and will later be kfree()d.
+ * The descriptor has already been removed from the current->mm's
+ * vma collection and will later be kfree()d.
  */
 static void shm_close(struct vm_area_struct *vma)
 {

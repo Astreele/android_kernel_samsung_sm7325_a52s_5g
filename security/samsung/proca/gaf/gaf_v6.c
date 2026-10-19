@@ -94,21 +94,12 @@ static struct GAForensicINFO {
 	.task_struct_struct_pid = offsetof(struct task_struct, pid),
 	.task_struct_struct_mm = offsetof(struct task_struct, mm),
 	.mm_struct_struct_pgd = offsetof(struct mm_struct, pgd),
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 1, 0))	
 	.mm_struct_struct_mmap = offsetof(struct mm_struct, mm_mt),
 	.mm_struct_struct_mm_rb = offsetof(struct mm_struct, mm_mt),
 	.vm_area_struct_struct_vm_next =
 		offsetof(struct vm_area_struct, vm_start),
 	.vm_area_struct_struct_vm_rb
 		= offsetof(struct vm_area_struct, vm_mm),
-#else
-	.mm_struct_struct_mmap = offsetof(struct mm_struct, mmap),
-	.mm_struct_struct_mm_rb = offsetof(struct mm_struct, mm_rb),
-	.vm_area_struct_struct_vm_next =
-		offsetof(struct vm_area_struct, vm_next),
-	.vm_area_struct_struct_vm_rb
-		= offsetof(struct vm_area_struct, vm_rb),
-#endif
 	.vm_area_struct_struct_vm_start =
 		offsetof(struct vm_area_struct, vm_start),
 	.vm_area_struct_struct_vm_end = offsetof(struct vm_area_struct, vm_end),

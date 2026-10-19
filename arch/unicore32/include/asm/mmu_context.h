@@ -66,12 +66,11 @@ switch_mm(struct mm_struct *prev, struct mm_struct *next,
 do { \
 	struct vm_area_struct *high_vma = find_vma(mm, 0xffff0000); \
 	if (high_vma) { \
-		BUG_ON(high_vma->vm_next);  /* it should be last */ \
-		if (high_vma->vm_prev) \
-			high_vma->vm_prev->vm_next = NULL; \
-		else \
-			mm->mmap = NULL; \
-		rb_erase(&high_vma->vm_rb, &mm->mm_rb); \
+		MA_STATE(uc_mas, &mm->mm_mt, 0, 0); \
+		BUG_ON(find_vma(mm, high_vma->vm_end));  /* it should be last */ \
+		uc_mas.index = high_vma->vm_start; \
+		uc_mas.last = high_vma->vm_start; \
+		mas_store(&uc_mas, NULL); \
 		vmacache_invalidate(mm); \
 		mm->map_count--; \
 		remove_vma(high_vma); \

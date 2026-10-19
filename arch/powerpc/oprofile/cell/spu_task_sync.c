@@ -333,7 +333,7 @@ get_exec_dcookie_and_offset(struct spu *spu, unsigned int *offsetp,
 	}
 
 	down_read(&mm->mmap_sem);
-	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+	for (vma = find_vma(mm, 0); vma; vma = find_vma(mm, vma->vm_end)) {
 		if (vma->vm_start > spu_ref || vma->vm_end <= spu_ref)
 			continue;
 		my_offset = spu_ref - vma->vm_start;

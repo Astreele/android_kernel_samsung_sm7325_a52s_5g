@@ -674,7 +674,7 @@ static noinline int zap_bt_entries_mapping(struct mm_struct *mm,
 		zap_page_range(vma, addr, len);
 		trace_mpx_unmap_zap(addr, addr+len);
 
-		vma = vma->vm_next;
+		vma = find_vma(mm, vma->vm_end);
 		addr = vma->vm_start;
 	}
 	return 0;
@@ -801,9 +801,9 @@ static int try_unmap_single_bt(struct mm_struct *mm,
 	 * entries in use.
 	 */
 	while (next && (next->vm_flags & VM_MPX))
-		next = next->vm_next;
+		next = find_vma(mm, next->vm_end);
 	while (prev && (prev->vm_flags & VM_MPX))
-		prev = prev->vm_prev;
+		find_vma_prev(mm, prev->vm_start, &prev);
 	/*
 	 * We know 'start' and 'end' lie within an area controlled
 	 * by a single bounds table.  See if there are any other
@@ -907,7 +907,7 @@ void mpx_notify_unmap(struct mm_struct *mm, unsigned long start,
 	while (vma && vma->vm_start < end) {
 		if (vma->vm_flags & VM_MPX)
 			return;
-		vma = vma->vm_next;
+		vma = find_vma(mm, vma->vm_end);
 	}
 
 	ret = mpx_unmap_tables(mm, start, end);
