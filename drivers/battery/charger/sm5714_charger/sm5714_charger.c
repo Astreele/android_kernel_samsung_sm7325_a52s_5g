@@ -99,12 +99,6 @@ static void chg_set_en_bypass_mode(struct sm5714_charger_data *charger, bool ena
 {
 	union power_supply_propval val = {0, };
 
-	if (enable && charger->otg_on) {
-		pr_info("sm5714-charger: %s: bypass refused while OTG supplies power\n",
-			__func__);
-		return;
-	}
-
 	if (enable) {
 		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x1 << 4), (0x1 << 4));	/* OFFREVERSE deactivated(1) */
 
@@ -119,26 +113,8 @@ static void chg_set_en_bypass_mode(struct sm5714_charger_data *charger, bool ena
 		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, (0x0 << 4), (0x1 << 4));	/* OFFREVERSE activated(0) */
 
 		chg_set_en_bypass(charger, 0);	/* ENBYPASS = disable(0) */
-
-		/* The enable path turned AICLEN_VBUS off while bypassing the
-		 * battery.  Leaving it disabled breaks input current
-		 * negotiation for the next charge cycle, so restore it. */
-		sm5714_update_reg(charger->i2c, SM5714_CHG_REG_CNTL1, (0x1 << 6), (0x1 << 6));		/* AICLEN_VBUS = enable(1) */
 	}
 	pr_info("sm5714-charger: %s: %s\n", __func__, enable ? "Enable" : "Disable");
-}
-
-static void bypass_exit_work(struct work_struct *work)
-{
-	struct sm5714_charger_data *charger =
-		container_of(work, struct sm5714_charger_data, bypass_exit_work.work);
-
-	if (sm5714_get_facmode())
-		return;
-
-	pr_info("sm5714-charger: %s: vbus lost while bypass active; exiting\n",
-		__func__);
-	chg_set_en_bypass_mode(charger, false);
 }
 #endif
 
@@ -1157,12 +1133,6 @@ static irqreturn_t chg_vbusuvlo_isr(int irq, void *data)
 	if (reg & 0x02) {
 		dev_info(charger->dev, "%s: bypass mode enabled\n",
 			__func__);
-#if defined(ENABLE_SM5714_ENBYPASS_MODE)
-		/* Bypass disconnects the battery from the system power path;
-		 * with the adapter gone there is no source left.  Exit it
-		 * before VSYS collapses. */
-		queue_delayed_work(charger->wqueue, &charger->bypass_exit_work, 0);
-#endif
 	}
 
 	return IRQ_HANDLED;
@@ -1372,9 +1342,6 @@ static int sm5714_charger_probe(struct platform_device *pdev)
 	}
 	charger->slow_rate_chg_mode = false;
 	INIT_DELAYED_WORK(&charger->aicl_work, aicl_work);
-#if defined(ENABLE_SM5714_ENBYPASS_MODE)
-	INIT_DELAYED_WORK(&charger->bypass_exit_work, bypass_exit_work);
-#endif
 	charger->aicl_ws = wakeup_source_register(&pdev->dev, "charger-aicl");
 
 	psy_cfg.drv_data = charger;
@@ -1473,10 +1440,6 @@ static int sm5714_charger_remove(struct platform_device *pdev)
 
 	power_supply_unregister(charger->psy_chg);
 
-#if defined(ENABLE_SM5714_ENBYPASS_MODE)
-	cancel_delayed_work_sync(&charger->bypass_exit_work);
-#endif
-
 	mutex_destroy(&charger->charger_mutex);
 
 	kfree(charger);
@@ -1487,18 +1450,6 @@ static int sm5714_charger_remove(struct platform_device *pdev)
 #if defined CONFIG_PM
 static int sm5714_charger_suspend(struct device *dev)
 {
-#if defined(ENABLE_SM5714_ENBYPASS_MODE)
-	struct sm5714_charger_data *charger =
-		platform_get_drvdata(to_platform_device(dev));
-	u8 reg;
-
-	/* Do not let a bypassed (battery-disconnected) state survive
-	 * suspend; unplugging while asleep would leave the system without
-	 * a battery path.  Factory bypass usage is preserved. */
-	sm5714_read_reg(charger->i2c, SM5714_CHG_REG_FACTORY1, &reg);
-	if (!sm5714_get_facmode() && (reg & 0x02))
-		chg_set_en_bypass_mode(charger, false);
-#endif
 	return 0;
 }
 

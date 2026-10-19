@@ -2043,32 +2043,6 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 	return i;
 }
 
-/* Bypass hands the system power path to VBUS, so it is only sane while a
- * charge-capable cable is actually connected.  Allow-list those cable types
- * and refuse everything else, including OTG (the phone must not disconnect
- * the battery while it is the one supplying power out of the port). */
-static bool is_vbus_charging_type(int cable_type)
-{
-	switch (cable_type) {
-	case SEC_BATTERY_CABLE_PREPARE_TA:
-	case SEC_BATTERY_CABLE_TA:
-	case SEC_BATTERY_CABLE_USB:
-	case SEC_BATTERY_CABLE_USB_CDP:
-	case SEC_BATTERY_CABLE_9V_TA:
-	case SEC_BATTERY_CABLE_9V_ERR:
-	case SEC_BATTERY_CABLE_9V_UNKNOWN:
-	case SEC_BATTERY_CABLE_12V_TA:
-	case SEC_BATTERY_CABLE_QC20:
-	case SEC_BATTERY_CABLE_QC30:
-	case SEC_BATTERY_CABLE_PDIC:
-	case SEC_BATTERY_CABLE_PDIC_APDO:
-	case SEC_BATTERY_CABLE_HV_TA_CHG_LIMIT:
-		return true;
-	default:
-		return false;
-	}
-}
-
 ssize_t sec_bat_store_attrs(
 					struct device *dev,
 					struct device_attribute *attr,
@@ -3956,16 +3930,6 @@ ssize_t sec_bat_store_attrs(
 	case NORMAL_MODE_BYPASS:
 		pr_info("%s: normal mode bypass for current measure\n", __func__);
 		if (sscanf(buf, "%10d\n", &x) == 1) {
-			/* Bypass disconnects the battery from the system power
-			 * path: it needs a charge-capable cable actually
-			 * supplying VBUS.  This also keeps bypass away from
-			 * OTG, where the phone itself is the power source. */
-			if (x && !is_vbus_charging_type(battery->cable_type)) {
-				pr_warn("%s: bypass requested without charge-capable cable (type %d); refusing\n",
-					__func__, battery->cable_type);
-				ret = -EPERM;
-				break;
-			}
 //			if (battery->pdata->detect_moisture && x) {
 //				sec_bat_set_charging_status(battery, POWER_SUPPLY_STATUS_DISCHARGING);
 //				sec_bat_set_charge(battery, SEC_BAT_CHG_MODE_BUCK_OFF);
