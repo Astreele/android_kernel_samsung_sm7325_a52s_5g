@@ -528,10 +528,6 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	if (retval)
 		goto out;
 
-	retval = mas_expected_entries(&mas, oldmm->map_count);
-	if (retval)
-		goto out;
-
 	prev = NULL;
 
 	retval = mas_expected_entries(&mas, oldmm->map_count);
