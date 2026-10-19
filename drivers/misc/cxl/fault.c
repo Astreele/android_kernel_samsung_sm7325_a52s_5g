@@ -322,7 +322,7 @@ static void cxl_prefault_vma(struct cxl_context *ctx)
 	}
 
 	down_read(&mm->mmap_sem);
-	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+	for (vma = find_vma(mm, 0); vma; vma = find_vma(mm, vma->vm_end)) {
 		for (ea = vma->vm_start; ea < vma->vm_end;
 				ea = next_segment(ea, slb.vsid)) {
 			rc = copro_calculate_slb(mm, ea, &slb);

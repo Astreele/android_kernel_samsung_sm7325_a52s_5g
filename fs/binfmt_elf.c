@@ -1581,6 +1581,7 @@ static void fill_siginfo_note(struct memelfnote *note, user_siginfo_t *csigdata,
 static int fill_files_note(struct memelfnote *note)
 {
 	struct vm_area_struct *vma;
+	VMA_ITERATOR(vmi, current->mm, 0);
 	unsigned count, size, names_ofs, remaining, n;
 	user_long_t *data;
 	user_long_t *start_end_ofs;
@@ -1605,7 +1606,7 @@ static int fill_files_note(struct memelfnote *note)
 	name_base = name_curpos = ((char *)data) + names_ofs;
 	remaining = size - names_ofs;
 	count = 0;
-	for (vma = current->mm->mmap; vma != NULL; vma = vma->vm_next) {
+	for_each_vma(vmi, vma) {
 		struct file *file;
 		const char *filename;
 
@@ -2135,7 +2136,7 @@ static void free_note_info(struct elf_note_info *info)
 static struct vm_area_struct *first_vma(struct task_struct *tsk,
 					struct vm_area_struct *gate_vma)
 {
-	struct vm_area_struct *ret = tsk->mm->mmap;
+	struct vm_area_struct *ret = find_vma(tsk->mm, 0);
 
 	if (ret)
 		return ret;
@@ -2150,7 +2151,7 @@ static struct vm_area_struct *next_vma(struct vm_area_struct *this_vma,
 {
 	struct vm_area_struct *ret;
 
-	ret = this_vma->vm_next;
+	ret = find_vma(this_vma->vm_mm, this_vma->vm_end);
 	if (ret)
 		return ret;
 	if (this_vma == gate_vma)
@@ -2206,7 +2207,7 @@ static int elf_core_dump(struct coredump_params *cprm)
 	 *
 	 * Only ptrace can touch these memory addresses, but it doesn't change
 	 * the map_count or the pages allocated. So no possibility of crashing
-	 * exists while dumping the mm->vm_next areas to the core file.
+	 * exists while dumping the vmas in the tree to the core file.
 	 */
   
 	/* alloc memory for large data structures: too large to be on stack */

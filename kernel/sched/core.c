@@ -5851,7 +5851,7 @@ bool is_sched_lib_based_app(pid_t pid)
 		goto put_task_struct;
 
 	down_read(&mm->mmap_sem);
-	for (vma = mm->mmap; vma ; vma = vma->vm_next) {
+	for (vma = find_vma(mm, 0); vma; vma = find_vma(mm, vma->vm_end)) {
 		if (vma->vm_file && vma->vm_flags & VM_EXEC) {
 			name = d_path(&vma->vm_file->f_path,
 					path_buf, LIB_PATH_LENGTH);

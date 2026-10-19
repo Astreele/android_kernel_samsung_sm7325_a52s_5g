@@ -245,7 +245,7 @@ done:
 
 /* Convert the EIP value of a sample into a persistent dentry/offset
  * pair that can then be added to the global event buffer. We make
- * sure to do this lookup before a mm->mmap modification happens so
+ * sure to do this lookup before the mm's address space is modified so
  * we don't lose track.
  *
  * The caller must ensure the mm is not nil (ie: not a kernel thread).
@@ -257,7 +257,7 @@ lookup_dcookie(struct mm_struct *mm, unsigned long addr, off_t *offset)
 	struct vm_area_struct *vma;
 
 	down_read(&mm->mmap_sem);
-	for (vma = find_vma(mm, addr); vma; vma = vma->vm_next) {
+	for (vma = find_vma(mm, addr); vma; vma = find_vma(mm, vma->vm_end)) {
 
 		if (addr < vma->vm_start || addr >= vma->vm_end)
 			continue;
@@ -487,7 +487,7 @@ typedef enum {
 /* Sync one of the CPU's buffers into the global event buffer.
  * Here we need to go through each batch of samples punctuated
  * by context switch notes, taking the task's mmap_sem and doing
- * lookup in task->mm->mmap to convert EIP into dcookie/offset
+ * lookup in task->mm's vmas to convert EIP into dcookie/offset
  * value.
  */
 void sync_buffer(int cpu)

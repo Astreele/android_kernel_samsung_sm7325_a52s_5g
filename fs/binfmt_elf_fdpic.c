@@ -1493,8 +1493,9 @@ static void fill_extnum_info(struct elfhdr *elf, struct elf_shdr *shdr4extnum,
 static bool elf_fdpic_dump_segments(struct coredump_params *cprm)
 {
 	struct vm_area_struct *vma;
+	VMA_ITERATOR(vmi, current->mm, 0);
 
-	for (vma = current->mm->mmap; vma; vma = vma->vm_next) {
+	for_each_vma(vmi, vma) {
 #ifdef CONFIG_MMU
 		unsigned long addr;
 #endif
@@ -1531,8 +1532,9 @@ static size_t elf_core_vma_data_size(unsigned long mm_flags)
 {
 	struct vm_area_struct *vma;
 	size_t size = 0;
+	VMA_ITERATOR(vmi, current->mm, 0);
 
-	for (vma = current->mm->mmap; vma; vma = vma->vm_next)
+	for_each_vma(vmi, vma)
 		if (maydump(vma, mm_flags))
 			size += vma->vm_end - vma->vm_start;
 	return size;
@@ -1573,6 +1575,7 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 	elf_addr_t e_shoff;
 	struct core_thread *ct;
 	struct elf_thread_status *tmp;
+	VMA_ITERATOR(vmi, current->mm, 0);
 
 	/*
 	 * We no longer stop all VM operations.
@@ -1583,7 +1586,7 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 	 *
 	 * Only ptrace can touch these memory addresses, but it doesn't change
 	 * the map_count or the pages allocated. So no possibility of crashing
-	 * exists while dumping the mm->vm_next areas to the core file.
+	 * exists while dumping the vmas in the tree to the core file.
 	 */
 
 	/* alloc memory for large data structures: too large to be on stack */
@@ -1724,7 +1727,7 @@ static int elf_fdpic_core_dump(struct coredump_params *cprm)
 		goto end_coredump;
 
 	/* write program headers for segments dump */
-	for (vma = current->mm->mmap; vma; vma = vma->vm_next) {
+	for_each_vma(vmi, vma) {
 		struct elf_phdr phdr;
 		size_t sz;
 
