@@ -141,6 +141,7 @@ struct sm5714_charger_data {
 	bool slow_rate_chg_mode;
 	struct workqueue_struct *wqueue;
 	struct delayed_work aicl_work;
+	struct delayed_work bypass_exit_work;
 	struct wakeup_source *aicl_ws;
 };
 
