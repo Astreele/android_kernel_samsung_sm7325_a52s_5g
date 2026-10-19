@@ -2694,6 +2694,24 @@ extern struct vm_area_struct * find_vma_prev(struct mm_struct * mm, unsigned lon
 struct vm_area_struct *find_vma_intersection(struct mm_struct *mm,
 			unsigned long start_addr, unsigned long end_addr);
 
+/**
+ * vma_lookup() - Find a VMA at a specific address
+ * @mm: The process address space.
+ * @addr: The user address.
+ *
+ * Return: The vm_area_struct at the given address, %NULL otherwise.
+ */
+static inline
+struct vm_area_struct *vma_lookup(struct mm_struct *mm, unsigned long addr)
+{
+	struct vm_area_struct *vma = find_vma(mm, addr);
+
+	if (vma && addr < vma->vm_start)
+		vma = NULL;
+
+	return vma;
+}
+
 static inline unsigned long vm_start_gap(struct vm_area_struct *vma)
 {
 	unsigned long vm_start = vma->vm_start;
