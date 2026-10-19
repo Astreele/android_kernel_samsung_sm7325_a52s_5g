@@ -7538,3 +7538,7 @@ CONFIG_DEFAULT_BBR=y
 # (each netns can create its own wg0).
 # Off by default: no interface exists until you create one.
 CONFIG_WIREGUARD=y
+
+# maple tree backport (upstream v6.1 library)
+# inert until a consumer (VMA tracking round) wires it in
+CONFIG_MAPLE_TREE=y

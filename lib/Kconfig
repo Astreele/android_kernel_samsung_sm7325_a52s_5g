@@ -437,6 +437,13 @@ config XARRAY_MULTI
 	  Support entries which occupy multiple consecutive indices in the
 	  XArray.
 
+config MAPLE_TREE
+	bool "Maple tree B-tree library (upstream v6.1 backport; no in-tree consumers yet)"
+	help
+	  Maples are B-trees optimized for storing sparse data, introduced
+	  upstream in v6.1.  This backports the library only; kernel behavior
+	  is unchanged until a consumer (VMA tracking round) wires it in.
+
 config ASSOCIATIVE_ARRAY
 	bool
 	help
