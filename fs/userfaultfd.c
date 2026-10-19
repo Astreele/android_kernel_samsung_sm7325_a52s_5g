@@ -1662,11 +1662,13 @@ static int userfaultfd_unregister(struct userfaultfd_ctx *ctx,
 			ret = split_vma(mm, vma, start, 1);
 			if (ret)
 				break;
+			mas_pause(&mas);
 		}
 		if (vma->vm_end > end) {
 			ret = split_vma(mm, vma, end, 0);
 			if (ret)
 				break;
+			mas_pause(&mas);
 		}
 	next:
 		/*
