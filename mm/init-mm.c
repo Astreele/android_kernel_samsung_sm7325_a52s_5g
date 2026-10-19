@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/mm_types.h>
-#include <linux/rbtree.h>
 #include <linux/maple_tree.h>
 #include <linux/rwsem.h>
 #include <linux/spinlock.h>
@@ -28,11 +27,7 @@
  * and size this cpu_bitmask to NR_CPUS.
  */
 struct mm_struct init_mm = {
-	.mm_rb		= RB_ROOT,
 	.mm_mt		= MTREE_INIT_EXT(mm_mt, MM_MT_FLAGS, init_mm.mmap_lock),
-#ifdef CONFIG_SPECULATIVE_PAGE_FAULT
-	.mm_rb_lock	= __RW_LOCK_UNLOCKED(init_mm.mm_rb_lock),
-#endif
 	.pgd		= swapper_pg_dir,
 	.mm_users	= ATOMIC_INIT(2),
 	.mm_count	= ATOMIC_INIT(1),

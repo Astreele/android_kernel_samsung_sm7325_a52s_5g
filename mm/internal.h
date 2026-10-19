@@ -49,7 +49,7 @@ static inline bool vma_has_changed(struct vm_fault *vmf)
 
 	/*
 	 * Matches both the wmb in write_seqlock_{begin,end}() and
-	 * the wmb in vma_rb_erase().
+	 * the wmb in __vma_unlink_list().
 	 */
 	smp_rmb();
 
