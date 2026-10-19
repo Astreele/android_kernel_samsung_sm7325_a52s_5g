@@ -2316,7 +2316,7 @@ static void unmap_region(struct mm_struct *mm, struct maple_tree *mt,
 	lru_add_drain();
 	tlb_gather_mmu(&tlb, mm, start, end);
 	update_hiwater_rss(mm);
-	unmap_vmas(&tlb, vma, start, end);
+	unmap_vmas(&tlb, mt, vma, start, end);
 
 	/*
 	 * Ensure we have no stale TLB entries by the time this mapping is
@@ -2333,7 +2333,7 @@ static void unmap_region(struct mm_struct *mm, struct maple_tree *mt,
 		}
 	}
 
-	free_pgtables(&tlb, vma, prev ? prev->vm_end : FIRST_USER_ADDRESS,
+	free_pgtables(&tlb, mt, vma, prev ? prev->vm_end : FIRST_USER_ADDRESS,
 				 next ? next->vm_start : USER_PGTABLES_CEILING);
 	tlb_finish_mmu(&tlb, start, end);
 }
@@ -3241,8 +3241,9 @@ void exit_mmap(struct mm_struct *mm)
 	tlb_gather_mmu(&tlb, mm, 0, -1);
 	/* update_hiwater_rss(mm) here? but nobody should be looking */
 	/* Use -1 here to ensure all VMAs in the mm are unmapped */
-	unmap_vmas(&tlb, vma, 0, -1);
-	free_pgtables(&tlb, vma, FIRST_USER_ADDRESS, USER_PGTABLES_CEILING);
+	unmap_vmas(&tlb, &mm->mm_mt, vma, 0, -1);
+	free_pgtables(&tlb, &mm->mm_mt, vma, FIRST_USER_ADDRESS,
+			USER_PGTABLES_CEILING);
 	tlb_finish_mmu(&tlb, 0, -1);
 	up_write(&mm->mmap_sem);
 

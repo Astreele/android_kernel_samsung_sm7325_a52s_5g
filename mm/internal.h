@@ -57,8 +57,9 @@ static inline bool vma_has_changed(struct vm_fault *vmf)
 }
 #endif /* CONFIG_SPECULATIVE_PAGE_FAULT */
 
-void free_pgtables(struct mmu_gather *tlb, struct vm_area_struct *start_vma,
-		unsigned long floor, unsigned long ceiling);
+void free_pgtables(struct mmu_gather *tlb, struct maple_tree *mt,
+		struct vm_area_struct *start_vma, unsigned long floor,
+		unsigned long ceiling);
 
 static inline bool can_madv_lru_vma(struct vm_area_struct *vma)
 {
