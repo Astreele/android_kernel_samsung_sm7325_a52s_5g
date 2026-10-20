@@ -475,6 +475,23 @@ out:
 	return lruvec;
 }
 
+/**
+ * folio_lruvec - return lruvec for isolating/putting an LRU folio
+ * @folio: Pointer to the folio.
+ *
+ * This function relies on folio->mem_cgroup being stable.
+ *
+ * Return: The lruvec for this folio and its pn.
+ */
+static inline struct lruvec *folio_lruvec(struct folio *folio)
+{
+	struct pglist_data *pgdat = folio_pgdat(folio);
+	struct mem_cgroup *memcg = folio_memcg(folio);
+
+	VM_WARN_ON_ONCE_FOLIO(!memcg && !mem_cgroup_disabled(), folio);
+	return mem_cgroup_lruvec(pgdat, memcg);
+}
+
 struct lruvec *mem_cgroup_page_lruvec(struct page *, struct pglist_data *);
 
 struct mem_cgroup *mem_cgroup_from_task(struct task_struct *p);
@@ -633,7 +650,9 @@ extern int do_swap_account;
 #endif
 
 struct mem_cgroup *lock_page_memcg(struct page *page);
-void __unlock_page_memcg(struct mem_cgroup *memcg);
+void folio_memcg_lock(struct folio *folio);
+void folio_memcg_unlock(struct folio *folio);
+void __folio_memcg_unlock(struct mem_cgroup *memcg);
 void unlock_page_memcg(struct page *page);
 
 /*
@@ -809,6 +828,42 @@ static inline void mod_lruvec_page_state(struct page *page,
 	local_irq_restore(flags);
 }
 
+static inline void __lruvec_stat_mod_folio(struct folio *folio,
+					   enum node_stat_item idx, int val)
+{
+	__mod_lruvec_page_state(&folio->page, idx, val);
+}
+
+static inline void __lruvec_stat_add_folio(struct folio *folio,
+					   enum node_stat_item idx)
+{
+	__lruvec_stat_mod_folio(folio, idx, folio_nr_pages(folio));
+}
+
+static inline void __lruvec_stat_sub_folio(struct folio *folio,
+					   enum node_stat_item idx)
+{
+	__lruvec_stat_mod_folio(folio, idx, -folio_nr_pages(folio));
+}
+
+static inline void lruvec_stat_mod_folio(struct folio *folio,
+					 enum node_stat_item idx, int val)
+{
+	mod_lruvec_page_state(&folio->page, idx, val);
+}
+
+static inline void lruvec_stat_add_folio(struct folio *folio,
+					 enum node_stat_item idx)
+{
+	lruvec_stat_mod_folio(folio, idx, folio_nr_pages(folio));
+}
+
+static inline void lruvec_stat_sub_folio(struct folio *folio,
+					 enum node_stat_item idx)
+{
+	lruvec_stat_mod_folio(folio, idx, -folio_nr_pages(folio));
+}
+
 unsigned long mem_cgroup_soft_limit_reclaim(pg_data_t *pgdat, int order,
 						gfp_t gfp_mask,
 						unsigned long *total_scanned);
@@ -982,6 +1037,11 @@ static inline struct lruvec *mem_cgroup_page_lruvec(struct page *page,
 	return &pgdat->lruvec;
 }
 
+static inline struct lruvec *folio_lruvec(struct folio *folio)
+{
+	return &folio_pgdat(folio)->lruvec;
+}
+
 static inline bool mm_match_cgroup(struct mm_struct *mm,
 		struct mem_cgroup *memcg)
 {
@@ -1080,7 +1140,15 @@ static inline struct mem_cgroup *lock_page_memcg(struct page *page)
 	return NULL;
 }
 
-static inline void __unlock_page_memcg(struct mem_cgroup *memcg)
+static inline void folio_memcg_lock(struct folio *folio)
+{
+}
+
+static inline void folio_memcg_unlock(struct folio *folio)
+{
+}
+
+static inline void __folio_memcg_unlock(struct mem_cgroup *memcg)
 {
 }
 
@@ -1201,6 +1269,42 @@ static inline void mod_lruvec_page_state(struct page *page,
 					 enum node_stat_item idx, int val)
 {
 	mod_node_page_state(page_pgdat(page), idx, val);
+}
+
+static inline void __lruvec_stat_mod_folio(struct folio *folio,
+					   enum node_stat_item idx, int val)
+{
+	__mod_lruvec_page_state(&folio->page, idx, val);
+}
+
+static inline void __lruvec_stat_add_folio(struct folio *folio,
+					   enum node_stat_item idx)
+{
+	__lruvec_stat_mod_folio(folio, idx, folio_nr_pages(folio));
+}
+
+static inline void __lruvec_stat_sub_folio(struct folio *folio,
+					   enum node_stat_item idx)
+{
+	__lruvec_stat_mod_folio(folio, idx, -folio_nr_pages(folio));
+}
+
+static inline void lruvec_stat_mod_folio(struct folio *folio,
+					 enum node_stat_item idx, int val)
+{
+	mod_lruvec_page_state(&folio->page, idx, val);
+}
+
+static inline void lruvec_stat_add_folio(struct folio *folio,
+					 enum node_stat_item idx)
+{
+	lruvec_stat_mod_folio(folio, idx, folio_nr_pages(folio));
+}
+
+static inline void lruvec_stat_sub_folio(struct folio *folio,
+					 enum node_stat_item idx)
+{
+	lruvec_stat_mod_folio(folio, idx, -folio_nr_pages(folio));
 }
 
 static inline void __mod_lruvec_slab_state(void *p, enum node_stat_item idx,

@@ -1491,12 +1491,30 @@ static inline struct mem_cgroup *page_memcg_rcu(struct page *page)
 	WARN_ON_ONCE(!rcu_read_lock_held());
 	return READ_ONCE(page->mem_cgroup);
 }
+static inline struct mem_cgroup *folio_memcg(struct folio *folio)
+{
+	return folio->mem_cgroup;
+}
+static inline struct mem_cgroup *folio_memcg_rcu(struct folio *folio)
+{
+	WARN_ON_ONCE(!rcu_read_lock_held());
+	return READ_ONCE(folio->mem_cgroup);
+}
 #else
 static inline struct mem_cgroup *page_memcg(struct page *page)
 {
 	return NULL;
 }
 static inline struct mem_cgroup *page_memcg_rcu(struct page *page)
+{
+	WARN_ON_ONCE(!rcu_read_lock_held());
+	return NULL;
+}
+static inline struct mem_cgroup *folio_memcg(struct folio *folio)
+{
+	return NULL;
+}
+static inline struct mem_cgroup *folio_memcg_rcu(struct folio *folio)
 {
 	WARN_ON_ONCE(!rcu_read_lock_held());
 	return NULL;

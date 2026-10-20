@@ -2078,17 +2078,17 @@ void mem_cgroup_print_oom_group(struct mem_cgroup *memcg)
 }
 
 /**
- * lock_page_memcg - lock a page->mem_cgroup binding
- * @page: the page
+ * folio_memcg_lock - Bind a folio to its memcg.
+ * @folio: The folio.
  *
- * This function protects unlocked LRU pages from being moved to
- * another cgroup.
+ * This function prevents unlocked LRU folios from being moved to
+ * another memcg.
  *
- * It ensures lifetime of the returned memcg. Caller is responsible
- * for the lifetime of the page; __unlock_page_memcg() is available
- * when @page might get freed inside the locked section.
+ * It ensures lifetime of the bound memcg.  The caller is responsible
+ * for the lifetime of the folio; __folio_memcg_unlock() is available
+ * when the folio's memcg is needed inside the locked section.
  */
-struct mem_cgroup *lock_page_memcg(struct page *page)
+void folio_memcg_lock(struct folio *folio)
 {
 	struct mem_cgroup *memcg;
 	unsigned long flags;
@@ -2099,48 +2099,62 @@ struct mem_cgroup *lock_page_memcg(struct page *page)
 	 * because page moving starts with an RCU grace period.
 	 *
 	 * The RCU lock also protects the memcg from being freed when
-	 * the page state that is going to change is the only thing
-	 * preventing the page itself from being freed. E.g. writeback
-	 * doesn't hold a page reference and relies on PG_writeback to
+	 * the folio state that is going to change is the only thing
+	 * preventing the folio itself from being freed. E.g. writeback
+	 * doesn't hold a folio reference and relies on PG_writeback to
 	 * keep off truncation, migration and so forth.
          */
 	rcu_read_lock();
 
 	if (mem_cgroup_disabled())
-		return NULL;
+		return;
 again:
-	memcg = page->mem_cgroup;
+	memcg = folio_memcg(folio);
 	if (unlikely(!memcg))
-		return NULL;
+		return;
 
 	if (atomic_read(&memcg->moving_account) <= 0)
-		return memcg;
+		return;
 
 	spin_lock_irqsave(&memcg->move_lock, flags);
-	if (memcg != page->mem_cgroup) {
+	if (memcg != folio_memcg(folio)) {
 		spin_unlock_irqrestore(&memcg->move_lock, flags);
 		goto again;
 	}
 
 	/*
 	 * When charge migration first begins, we can have locked and
-	 * unlocked page stat updates happening concurrently.  Track
-	 * the task who has the lock for unlock_page_memcg().
+	 * unlocked folio stat updates happening concurrently.  Track
+	 * the task who has the lock for folio_memcg_unlock().
 	 */
 	memcg->move_lock_task = current;
 	memcg->move_lock_flags = flags;
+}
+EXPORT_SYMBOL(folio_memcg_lock);
 
-	return memcg;
+/**
+ * lock_page_memcg - lock a page->mem_cgroup binding
+ * @page: the page
+ *
+ * Ours-vintage wrapper: returns the bound memcg so page-era callers
+ * keep their contract; upstream converted those callers to folio_memcg().
+ */
+struct mem_cgroup *lock_page_memcg(struct page *page)
+{
+	struct folio *folio = page_folio(page);
+
+	folio_memcg_lock(folio);
+	return folio_memcg(folio);
 }
 EXPORT_SYMBOL(lock_page_memcg);
 
 /**
- * __unlock_page_memcg - unlock and unpin a memcg
+ * __folio_memcg_unlock - unlock and unpin a memcg
  * @memcg: the memcg
  *
- * Unlock and unpin a memcg returned by lock_page_memcg().
+ * Unlock and unpin a memcg returned by folio_memcg_lock().
  */
-void __unlock_page_memcg(struct mem_cgroup *memcg)
+void __folio_memcg_unlock(struct mem_cgroup *memcg)
 {
 	if (memcg && memcg->move_lock_task == current) {
 		unsigned long flags = memcg->move_lock_flags;
@@ -2155,12 +2169,26 @@ void __unlock_page_memcg(struct mem_cgroup *memcg)
 }
 
 /**
+ * folio_memcg_unlock - Release the binding between a folio and its memcg.
+ * @folio: The folio.
+ *
+ * This releases the binding created by folio_memcg_lock().  This does
+ * not change the accounting of this folio to its memcg, but it does
+ * permit others to change it.
+ */
+void folio_memcg_unlock(struct folio *folio)
+{
+	__folio_memcg_unlock(folio_memcg(folio));
+}
+EXPORT_SYMBOL(folio_memcg_unlock);
+
+/**
  * unlock_page_memcg - unlock a page->mem_cgroup binding
  * @page: the page
  */
 void unlock_page_memcg(struct page *page)
 {
-	__unlock_page_memcg(page->mem_cgroup);
+	__folio_memcg_unlock(page_memcg(page));
 }
 EXPORT_SYMBOL(unlock_page_memcg);
 
@@ -5635,7 +5663,7 @@ static int mem_cgroup_move_account(struct page *page,
 
 	page->mem_cgroup = to; 	/* caller should have done css_get */
 
-	__unlock_page_memcg(from);
+	__folio_memcg_unlock(from);
 
 	ret = 0;
 

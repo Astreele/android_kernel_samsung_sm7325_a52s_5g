@@ -1528,14 +1528,20 @@ EXPORT_SYMBOL(unlock_page);
  * end_page_writeback - end writeback against a page
  * @page: the page
  */
-void end_page_writeback(struct page *page)
+/**
+ * folio_end_writeback - End writeback against a folio.
+ * @folio: The folio.
+ */
+void folio_end_writeback(struct folio *folio)
 {
+	struct page *page = &folio->page;
+
 	/*
 	 * TestClearPageReclaim could be used here but it is an atomic
 	 * operation and overkill in this particular case. Failing to
-	 * shuffle a page marked for immediate reclaim is too mild to
+	 * shuffle a folio marked for immediate reclaim is too mild to
 	 * justify taking an atomic operation penalty at the end of
-	 * ever page writeback.
+	 * every folio writeback.
 	 */
 	if (PageReclaim(page)) {
 		ClearPageReclaim(page);
@@ -1543,18 +1549,28 @@ void end_page_writeback(struct page *page)
 	}
 
 	/*
-	 * Writeback does not hold a page reference of its own, relying
+	 * Writeback does not hold a folio reference of its own, relying
 	 * on truncation to wait for the clearing of PG_writeback.
-	 * But here we must make sure that the page is not freed and
+	 * But here we must make sure that the folio is not freed and
 	 * reused before the wake_up_page().
 	 */
-	get_page(page);
-	if (!test_clear_page_writeback(page))
+	folio_get(folio);
+	if (!__folio_end_writeback(folio))
 		BUG();
 
 	smp_mb__after_atomic();
 	wake_up_page(page, PG_writeback);
-	put_page(page);
+	folio_put(folio);
+}
+EXPORT_SYMBOL(folio_end_writeback);
+
+/*
+ * After completing I/O on a page, call this routine to update the page
+ * flags appropriately
+ */
+void end_page_writeback(struct page *page)
+{
+	folio_end_writeback(page_folio(page));
 }
 EXPORT_SYMBOL(end_page_writeback);
 
