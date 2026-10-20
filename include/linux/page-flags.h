@@ -638,23 +638,18 @@ static inline bool test_set_page_writeback(struct page *page)
 	return set_page_writeback(page);
 }
 
-static inline bool test_set_page_writeback_keepwrite(struct page *page)
-{
-	return set_page_writeback_keepwrite(page);
-}
+__PAGEFLAG(Head, head, PF_ANY) CLEARPAGEFLAG(Head, head, PF_ANY)
 
-/* Whether there are one or multiple pages in a folio */
-static inline bool folio_test_single(struct folio *folio)
-{
-	return !folio_test_head(folio);
-}
-
-static inline bool folio_test_multi(struct folio *folio)
+/**
+ * folio_test_large() - Does this folio contain more than one page?
+ * @folio: The folio to test.
+ *
+ * Return: True if the folio is larger than one page.
+ */
+static inline bool folio_test_large(struct folio *folio)
 {
 	return folio_test_head(folio);
 }
-
-__PAGEFLAG(Head, head, PF_ANY) CLEARPAGEFLAG(Head, head, PF_ANY)
 
 static __always_inline void set_compound_head(struct page *page, struct page *head)
 {
@@ -693,11 +688,6 @@ static inline bool page_huge_active(struct page *page)
 {
 	return 0;
 }
-
-static inline bool folio_test_hugetlb(struct folio *folio)
-{
-	return PageHeadHuge(&folio->page);
-}
 #endif
 
 
@@ -718,7 +708,7 @@ static inline int PageTransHuge(struct page *page)
 
 static inline bool folio_test_transhuge(struct folio *folio)
 {
-	return PageTransHuge(&folio->page);
+	return folio_test_head(folio);
 }
 
 /*

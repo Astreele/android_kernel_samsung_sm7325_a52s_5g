@@ -563,7 +563,7 @@ static inline pgoff_t linear_page_index(struct vm_area_struct *vma,
 extern void __lock_page(struct page *page);
 extern int __lock_page_killable(struct page *page);
 void __folio_lock(struct folio *folio);
-void __folio_lock_killable(struct folio *folio);
+int __folio_lock_killable(struct folio *folio);
 int __lock_page_or_retry(struct page *page, struct mm_struct *mm,
 				unsigned int flags);
 bool __folio_lock_or_retry(struct folio *folio, struct mm_struct *mm,
