@@ -404,10 +404,6 @@ void tag_pages_for_writeback(struct address_space *mapping,
 			     pgoff_t start, pgoff_t end);
 
 void account_page_redirty(struct page *page);
-void folio_account_redirty(struct folio *folio);
-bool folio_redirty_for_writepage(struct writeback_control *, struct folio *);
-bool redirty_page_for_writepage(struct writeback_control *, struct page *);
-bool filemap_dirty_folio(struct address_space *mapping, struct folio *folio);
 
 void sb_mark_inode_writeback(struct inode *inode);
 void sb_clear_inode_writeback(struct inode *inode);
