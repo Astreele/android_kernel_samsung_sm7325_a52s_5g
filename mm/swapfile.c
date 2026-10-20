@@ -3515,6 +3515,11 @@ struct swap_info_struct *page_swap_info(struct page *page)
 	return swp_swap_info(entry);
 }
 
+struct swap_info_struct *folio_swap_info(struct folio *folio)
+{
+	return page_swap_info(&folio->page);
+}
+
 /*
  * out-of-line __page_file_ methods to avoid include hell.
  */
@@ -3523,6 +3528,12 @@ struct address_space *__page_file_mapping(struct page *page)
 	return page_swap_info(page)->swap_file->f_mapping;
 }
 EXPORT_SYMBOL_GPL(__page_file_mapping);
+
+struct address_space *swapcache_mapping(struct folio *folio)
+{
+	return folio_swap_info(folio)->swap_file->f_mapping;
+}
+EXPORT_SYMBOL_GPL(swapcache_mapping);
 
 pgoff_t __page_file_index(struct page *page)
 {

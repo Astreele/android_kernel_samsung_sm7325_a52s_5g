@@ -142,91 +142,15 @@ static inline int mapping_sensitive(struct address_space *mapping)
 
 void release_pages(struct page **pages, int nr);
 
-/*
- * speculatively take a reference to a page.
- * If the page is free (_refcount == 0), then _refcount is untouched, and 0
- * is returned. Otherwise, _refcount is incremented by 1 and 1 is returned.
- *
- * This function must be called inside the same rcu_read_lock() section as has
- * been used to lookup the page in the pagecache radix-tree (or page table):
- * this allows allocators to use a synchronize_rcu() to stabilize _refcount.
- *
- * Unless an RCU grace period has passed, the count of all pages coming out
- * of the allocator must be considered unstable. page_count may return higher
- * than expected, and put_page must be able to do the right thing when the
- * page has been finished with, no matter what it is subsequently allocated
- * for (because put_page is what is used here to drop an invalid speculative
- * reference).
- *
- * This is the interesting part of the lockless pagecache (and lockless
- * get_user_pages) locking protocol, where the lookup-side (eg. find_get_page)
- * has the following pattern:
- * 1. find page in radix tree
- * 2. conditionally increment refcount
- * 3. check the page is still in pagecache (if no, goto 1)
- *
- * Remove-side that cares about stability of _refcount (eg. reclaim) has the
- * following (with the i_pages lock held):
- * A. atomically check refcount is correct and set it to 0 (atomic_cmpxchg)
- * B. remove page from pagecache
- * C. free the page
- *
- * There are 2 critical interleavings that matter:
- * - 2 runs before A: in this case, A sees elevated refcount and bails out
- * - A runs before 2: in this case, 2 sees zero refcount and retries;
- *   subsequently, B will complete and 1 will find no page, causing the
- *   lookup to return NULL.
- *
- * It is possible that between 1 and 2, the page is removed then the exact same
- * page is inserted into the same position in pagecache. That's OK: the
- * old find_get_page using a lock could equally have run before or after
- * such a re-insertion, depending on order that locks are granted.
- *
- * Lookups racing against pagecache insertion isn't a big problem: either 1
- * will find the page or it will not. Likewise, the old find_get_page could run
- * either before the insertion or afterwards, depending on timing.
- */
-static inline int __page_cache_add_speculative(struct page *page, int count)
+static inline bool page_cache_add_speculative(struct page *page, int count)
 {
-#ifdef CONFIG_TINY_RCU
-# ifdef CONFIG_PREEMPT_COUNT
-	VM_BUG_ON(!in_atomic() && !irqs_disabled());
-# endif
-	/*
-	 * Preempt must be disabled here - we rely on rcu_read_lock doing
-	 * this for us.
-	 *
-	 * Pagecache won't be truncated from interrupt context, so if we have
-	 * found a page in the radix tree here, we have pinned its refcount by
-	 * disabling preempt, and hence no need for the "speculative get" that
-	 * SMP requires.
-	 */
-	VM_BUG_ON_PAGE(page_count(page) == 0, page);
-	page_ref_add(page, count);
-
-#else
-	if (unlikely(!page_ref_add_unless(page, count, 0))) {
-		/*
-		 * Either the page has been freed, or will be freed.
-		 * In either case, retry here and the caller should
-		 * do the right thing (see comments above).
-		 */
-		return 0;
-	}
-#endif
 	VM_BUG_ON_PAGE(PageTail(page), page);
-
-	return 1;
+	return folio_ref_try_add_rcu((struct folio *)page, count);
 }
 
-static inline int page_cache_get_speculative(struct page *page)
+static inline bool page_cache_get_speculative(struct page *page)
 {
-	return __page_cache_add_speculative(page, 1);
-}
-
-static inline int page_cache_add_speculative(struct page *page, int count)
-{
-	return __page_cache_add_speculative(page, count);
+	return page_cache_add_speculative(page, 1);
 }
 
 #ifdef CONFIG_NUMA
@@ -460,6 +384,61 @@ static inline pgoff_t page_to_pgoff(struct page *page)
 	return page_to_index(page);
 }
 
+#define swapcache_index(folio)	__page_file_index(&(folio)->page)
+/**
+ * folio_index - File index of a folio.
+ * @folio: The folio.
+ *
+ * For a folio which is either in the page cache or the swap cache,
+ * return its index within the address_space it belongs to.  If you know
+ * the page is definitely in the page cache, you can look at the folio's
+ * index directly.
+ *
+ * Return: The index (offset in units of pages) of a folio in its file.
+ */
+static inline pgoff_t folio_index(struct folio *folio)
+{
+	if (unlikely(folio_test_swapcache(folio)))
+		return swapcache_index(folio);
+	return folio->index;
+}
+
+/**
+ * folio_file_page - The page for a particular index.
+ * @folio: The folio which contains this index.
+ * @index: The index we want to look up.
+ *
+ * Sometimes after looking up a folio in the page cache, we need to
+ * obtain the specific page for an index (eg a page fault).
+ *
+ * Return: The page containing the file data for this index.
+ */
+static inline struct page *folio_file_page(struct folio *folio, pgoff_t index)
+{
+	/* HugeTLBfs indexes the page cache in units of hpage_size */
+	if (folio_test_hugetlb(folio))
+		return &folio->page;
+	return folio_page(folio, index & (folio_nr_pages(folio) - 1));
+}
+
+/**
+ * folio_contains - Does this folio contain this index?
+ * @folio: The folio.
+ * @index: The page index within the file.
+ *
+ * Context: The caller should have the page locked in order to prevent
+ * (eg) shmem from moving the page between the page cache and swap cache
+ * and changing its index in the middle of the operation.
+ * Return: true or false.
+ */
+static inline bool folio_contains(struct folio *folio, pgoff_t index)
+{
+	/* HugeTLBfs indexes the page cache in units of hpage_size */
+	if (folio_test_hugetlb(folio))
+		return folio->index == index;
+	return index - folio_index(folio) < folio_nr_pages(folio);
+}
+
 /*
  * Return byte-offset into filesystem object for page.
  */
@@ -471,6 +450,100 @@ static inline loff_t page_offset(struct page *page)
 static inline loff_t page_file_offset(struct page *page)
 {
 	return ((loff_t)page_index(page)) << PAGE_SHIFT;
+}
+
+/**
+ * folio_pos - Returns the byte position of this folio in its file.
+ * @folio: The folio.
+ */
+static inline loff_t folio_pos(struct folio *folio)
+{
+	return page_offset(&folio->page);
+}
+
+/**
+ * folio_file_pos - Returns the byte position of this folio in its file.
+ * @folio: The folio.
+ *
+ * This differs from folio_pos() for folios which belong to a swap file.
+ * NFS is the only filesystem today which needs to use folio_file_pos().
+ */
+static inline loff_t folio_file_pos(struct folio *folio)
+{
+	return page_file_offset(&folio->page);
+}
+
+/**
+ * folio_attach_private - Attach private data to a folio.
+ * @folio: Folio to attach data to.
+ * @data: Data to attach to folio.
+ *
+ * Attaching private data to a folio increments the page's reference count.
+ * The data must be detached before the folio will be freed.
+ */
+static inline void folio_attach_private(struct folio *folio, void *data)
+{
+	folio_get(folio);
+	folio->private = data;
+	folio_set_private(folio);
+}
+
+/**
+ * folio_detach_private - Detach private data from a folio.
+ * @folio: Folio to detach data from.
+ *
+ * Removes the data that was previously attached to the folio and decrements
+ * the refcount.
+ *
+ * Return: Data that was attached to the folio.
+ */
+static inline void *folio_detach_private(struct folio *folio)
+{
+	void *data = folio_get_private(folio);
+
+	if (!folio_test_private(folio))
+		return data;
+
+	folio_clear_private(folio);
+	folio->private = NULL;
+	folio_put(folio);
+	return data;
+}
+
+static inline void attach_page_private(struct page *page, void *data)
+{
+	folio_attach_private(page_folio(page), data);
+}
+
+static inline void *detach_page_private(struct page *page)
+{
+	return folio_detach_private(page_folio(page));
+}
+
+struct address_space *page_mapping(struct page *);
+struct address_space *folio_mapping(struct folio *);
+struct address_space *swapcache_mapping(struct folio *);
+/**
+ * folio_file_mapping - Find the mapping this folio belongs to.
+ * @folio: The folio.
+ *
+ * For folios which are in the page cache, return the mapping that this
+ * page belongs to.  Folios in the swap cache return the mapping of the
+ * swap file or swap device where the data is stored.  This is different
+ * from the mapping returned by folio_mapping().  The only reason to
+ * use it is if, like NFS, you return 0 from ->activate_swapfile.
+ *
+ * Do not call this for folios which aren't in the page cache or swap cache.
+ */
+static inline struct address_space *folio_file_mapping(struct folio *folio)
+{
+	if (unlikely(folio_test_swapcache(folio)))
+		return swapcache_mapping(folio);
+	return folio->mapping;
+}
+static inline struct address_space *page_file_mapping(struct page *page)
+{
+	return folio_file_mapping(page_folio(page));
 }
 
 extern pgoff_t linear_hugepage_index(struct vm_area_struct *vma,
