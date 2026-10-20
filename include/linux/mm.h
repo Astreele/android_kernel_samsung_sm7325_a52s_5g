@@ -1937,23 +1937,31 @@ extern void do_invalidatepage(struct page *page, unsigned int offset,
 			      unsigned int length);
 
 void __set_page_dirty(struct page *, struct address_space *, int warn);
+void __folio_mark_dirty(struct folio *, struct address_space *, int warn);
 int __set_page_dirty_nobuffers(struct page *page);
 int __set_page_dirty_no_writeback(struct page *page);
-int redirty_page_for_writepage(struct writeback_control *wbc,
-				struct page *page);
 void account_page_dirtied(struct page *page, struct address_space *mapping);
 void account_page_cleaned(struct page *page, struct address_space *mapping,
 			  struct bdi_writeback *wb);
-int set_page_dirty(struct page *page);
+bool set_page_dirty(struct page *page);
+bool folio_mark_dirty(struct folio *folio);
 int set_page_dirty_lock(struct page *page);
 void __cancel_dirty_page(struct page *page);
+void __folio_cancel_dirty(struct folio *folio);
+static inline void folio_cancel_dirty(struct folio *folio)
+{
+	/* Avoid atomic ops, locking, etc. when not actually needed. */
+	if (folio_test_dirty(folio))
+		__folio_cancel_dirty(folio);
+}
 static inline void cancel_dirty_page(struct page *page)
 {
 	/* Avoid atomic ops, locking, etc. when not actually needed. */
 	if (PageDirty(page))
 		__cancel_dirty_page(page);
 }
-int clear_page_dirty_for_io(struct page *page);
+bool clear_page_dirty_for_io(struct page *page);
+bool folio_clear_dirty_for_io(struct folio *folio);
 
 int get_cmdline(struct task_struct *task, char *buffer, int buflen);
 
@@ -2801,8 +2809,6 @@ extern void filemap_map_pages(struct vm_fault *vmf,
 extern vm_fault_t filemap_page_mkwrite(struct vm_fault *vmf);
 
 /* mm/page-writeback.c */
-int __must_check write_one_page(struct page *page);
-void task_dirty_inc(struct task_struct *tsk);
 
 /* readahead.c */
 #define VM_READAHEAD_PAGES	(SZ_128K / PAGE_SIZE)

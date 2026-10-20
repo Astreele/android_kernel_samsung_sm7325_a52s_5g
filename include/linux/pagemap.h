@@ -721,6 +721,11 @@ extern void end_page_writeback(struct page *page);
 void folio_end_writeback(struct folio *folio);
 void wait_for_stable_page(struct page *page);
 void folio_wait_stable(struct folio *folio);
+int __must_check folio_write_one(struct folio *folio);
+static inline int __must_check write_one_page(struct page *page)
+{
+	return folio_write_one(page_folio(page));
+}
 
 void page_endio(struct page *page, bool is_write, int err);
 

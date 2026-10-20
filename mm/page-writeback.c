@@ -1118,7 +1118,7 @@ static void wb_update_write_bandwidth(struct bdi_writeback *wb,
 	 * write_bandwidth = ---------------------------------------------------
 	 *                                          period
 	 *
-	 * @written may have decreased due to account_page_redirty().
+	 * @written may have decreased due to folio_account_redirty().
 	 * Avoid underflowing @bw calculation.
 	 */
 	bw = written - min(written, wb->written_stamp);
@@ -2458,44 +2458,44 @@ int do_writepages(struct address_space *mapping, struct writeback_control *wbc)
 }
 
 /**
- * write_one_page - write out a single page and wait on I/O
- * @page: the page to write
+ * folio_write_one - write out a single folio and wait on I/O.
+ * @folio: The folio to write.
  *
- * The page must be locked by the caller and will be unlocked upon return.
+ * The folio must be locked by the caller and will be unlocked upon return.
  *
  * Note that the mapping's AS_EIO/AS_ENOSPC flags will be cleared when this
  * function returns.
  *
  * Return: %0 on success, negative error code otherwise
  */
-int write_one_page(struct page *page)
+int folio_write_one(struct folio *folio)
 {
-	struct address_space *mapping = page->mapping;
+	struct address_space *mapping = folio->mapping;
 	int ret = 0;
 	struct writeback_control wbc = {
 		.sync_mode = WB_SYNC_ALL,
-		.nr_to_write = 1,
+		.nr_to_write = folio_nr_pages(folio),
 	};
 
-	BUG_ON(!PageLocked(page));
+	BUG_ON(!folio_test_locked(folio));
 
-	wait_on_page_writeback(page);
+	folio_wait_writeback(folio);
 
-	if (clear_page_dirty_for_io(page)) {
-		get_page(page);
-		ret = mapping->a_ops->writepage(page, &wbc);
+	if (folio_clear_dirty_for_io(folio)) {
+		folio_get(folio);
+		ret = mapping->a_ops->writepage(&folio->page, &wbc);
 		if (ret == 0)
-			wait_on_page_writeback(page);
-		put_page(page);
+			folio_wait_writeback(folio);
+		folio_put(folio);
 	} else {
-		unlock_page(page);
+		folio_unlock(folio);
 	}
 
 	if (!ret)
 		ret = filemap_check_errors(mapping);
 	return ret;
 }
-EXPORT_SYMBOL(write_one_page);
+EXPORT_SYMBOL(folio_write_one);
 
 /*
  * For address_spaces which do not use buffers nor write back.
@@ -2567,35 +2567,65 @@ void account_page_cleaned(struct page *page, struct address_space *mapping,
  * hold the page lock, but e.g. zap_pte_range() calls with the page mapped and
  * the pte lock held, which also locks out truncation.
  */
+/**
+ * filemap_dirty_folio - Mark a folio dirty for filesystems which do not use buffer_heads.
+ * @mapping: Address space this folio belongs to.
+ * @folio: Folio to be marked as dirty.
+ *
+ * Filesystems which do not use buffer heads should call this function
+ * from their set_page_dirty address space operation.  It ignores the
+ * contents of folio_get_private(), so if the filesystem marks individual
+ * blocks as dirty, the filesystem should handle that itself.
+ *
+ * This is also sometimes used by filesystems which use buffer_heads when
+ * a single buffer is being dirtied: we want to set the folio dirty in
+ * that case, but not all the buffers.  This is a "bottom-up" dirtying,
+ * whereas __set_page_dirty_buffers() is a "top-down" dirtying.
+ *
+ * The caller must ensure this doesn't race with truncation.  Most will
+ * simply hold the folio lock, but e.g. zap_pte_range() calls with the
+ * folio mapped and the pte lock held, which also locks out truncation.
+ */
+bool filemap_dirty_folio(struct address_space *mapping, struct folio *folio)
+{
+	folio_memcg_lock(folio);
+	if (folio_test_set_dirty(folio)) {
+		folio_memcg_unlock(folio);
+		return false;
+	}
+
+	__folio_mark_dirty(folio, mapping, !folio_test_private(folio));
+	folio_memcg_unlock(folio);
+
+	if (mapping->host) {
+		/* !PageAnon && !swapper_space */
+		__mark_inode_dirty(mapping->host, I_DIRTY_PAGES);
+	}
+	return true;
+}
+EXPORT_SYMBOL(filemap_dirty_folio);
+
+/*
+ * For address_spaces which do not use buffers.  Just tag the page as dirty in
+ * the xarray.
+ *
+ * This is also used when a single buffer is being dirtied: we want to set the
+ * page dirty in that case, but not all the buffers.  This is a "bottom-up"
+ * dirtying, whereas __set_page_dirty_buffers() is a "top-down" dirtying.
+ *
+ * The caller must ensure this doesn't race with truncation.  Most will simply
+ * hold the page lock, but e.g. zap_pte_range() calls with the page mapped and
+ * the pte lock held, which also locks out truncation.
+ */
 int __set_page_dirty_nobuffers(struct page *page)
 {
-	lock_page_memcg(page);
-	if (!TestSetPageDirty(page)) {
-		struct address_space *mapping = page_mapping(page);
-		unsigned long flags;
+	struct address_space *mapping = page_mapping(page);
 
-		if (!mapping) {
-			unlock_page_memcg(page);
-			return 1;
-		}
-
-		xa_lock_irqsave(&mapping->i_pages, flags);
-		BUG_ON(page_mapping(page) != mapping);
-		WARN_ON_ONCE(!PagePrivate(page) && !PageUptodate(page));
-		account_page_dirtied(page, mapping);
-		__xa_set_mark(&mapping->i_pages, page_index(page),
-				   PAGECACHE_TAG_DIRTY);
-		xa_unlock_irqrestore(&mapping->i_pages, flags);
-		unlock_page_memcg(page);
-
-		if (mapping->host) {
-			/* !PageAnon && !swapper_space */
-			__mark_inode_dirty(mapping->host, I_DIRTY_PAGES);
-		}
+	/* Ours-vintage guard: page_mapping() may be NULL here. */
+	if (!mapping)
 		return 1;
-	}
-	unlock_page_memcg(page);
-	return 0;
+
+	return filemap_dirty_folio(mapping, page_folio(page));
 }
 EXPORT_SYMBOL(__set_page_dirty_nobuffers);
 
@@ -2606,9 +2636,21 @@ EXPORT_SYMBOL(__set_page_dirty_nobuffers);
  * systematic errors in balanced_dirty_ratelimit and the dirty pages position
  * control.
  */
-void account_page_redirty(struct page *page)
+/**
+ * folio_account_redirty - Manually account for redirtying a page.
+ * @folio: The folio which is being redirtied.
+ *
+ * Most filesystems should call folio_redirty_for_writepage() instead
+ * of this fuction.  If your filesystem is doing writeback outside the
+ * context of a writeback_control(), it can call this when redirtying
+ * a folio, to de-account the dirty counters (NR_DIRTIED, WB_DIRTIED,
+ * tsk->nr_dirtied), so that they match the written counters (NR_WRITTEN,
+ * WB_WRITTEN) in long term. The mismatches will lead to systematic errors
+ * in balanced_dirty_ratelimit and the dirty pages position control.
+ */
+void folio_account_redirty(struct folio *folio)
 {
-	struct address_space *mapping = page->mapping;
+	struct address_space *mapping = folio->mapping;
 
 	if (mapping && mapping_cap_account_dirty(mapping)) {
 		struct inode *inode = mapping->host;
@@ -2617,10 +2659,16 @@ void account_page_redirty(struct page *page)
 
 		wb = unlocked_inode_to_wb_begin(inode, &cookie);
 		current->nr_dirtied--;
-		dec_node_page_state(page, NR_DIRTIED);
+		dec_node_page_state(&folio->page, NR_DIRTIED);
 		dec_wb_stat(wb, WB_DIRTIED);
 		unlocked_inode_to_wb_end(inode, &cookie);
 	}
+}
+EXPORT_SYMBOL(folio_account_redirty);
+
+void account_page_redirty(struct page *page)
+{
+	folio_account_redirty(page_folio(page));
 }
 EXPORT_SYMBOL(account_page_redirty);
 
@@ -2629,33 +2677,52 @@ EXPORT_SYMBOL(account_page_redirty);
  * page for some reason, it should redirty the locked page via
  * redirty_page_for_writepage() and it should then unlock the page and return 0
  */
-int redirty_page_for_writepage(struct writeback_control *wbc, struct page *page)
+/**
+ * folio_redirty_for_writepage - Decline to write a dirty folio.
+ * @wbc: The writeback control.
+ * @folio: The folio.
+ *
+ * When a writepage implementation decides that it doesn't want to write
+ * @folio for some reason, it should call this function, unlock @folio and
+ * return 0.
+ *
+ * Return: True if we redirtied the folio.  False if someone else dirtied
+ * it first.
+ */
+bool folio_redirty_for_writepage(struct writeback_control *wbc,
+		struct folio *folio)
 {
-	int ret;
+	bool ret;
+	long nr = folio_nr_pages(folio);
 
-	wbc->pages_skipped++;
-	ret = __set_page_dirty_nobuffers(page);
-	account_page_redirty(page);
+	wbc->pages_skipped += nr;
+	ret = filemap_dirty_folio(folio->mapping, folio);
+	folio_account_redirty(folio);
 	return ret;
+}
+EXPORT_SYMBOL(folio_redirty_for_writepage);
+
+bool redirty_page_for_writepage(struct writeback_control *wbc, struct page *page)
+{
+	return folio_redirty_for_writepage(wbc, page_folio(page));
 }
 EXPORT_SYMBOL(redirty_page_for_writepage);
 
 /*
- * Dirty a page.
+ * Dirty a folio.
  *
- * For pages with a mapping this should be done under the page lock
+ * For folios with a mapping this should be done under the page lock
  * for the benefit of asynchronous memory errors who prefer a consistent
- * dirty state. This rule can be broken in some special cases,
- * but should be better not to.
+ * dirty state. This rule can be broken in some special cases, but
+ * should be better not to.
  *
  * If the mapping doesn't provide a set_page_dirty a_op, then
  * just fall through and assume that it wants buffer_heads.
  */
-int set_page_dirty(struct page *page)
+bool folio_mark_dirty(struct folio *folio)
 {
-	struct address_space *mapping = page_mapping(page);
+	struct address_space *mapping = folio_mapping(folio);
 
-	page = compound_head(page);
 	if (likely(mapping)) {
 		int (*spd)(struct page *) = mapping->a_ops->set_page_dirty;
 		/*
@@ -2668,19 +2735,25 @@ int set_page_dirty(struct page *page)
 		 * it will confuse readahead and make it restart the size rampup
 		 * process. But it's a trivial problem.
 		 */
-		if (PageReclaim(page))
-			ClearPageReclaim(page);
+		if (folio_test_reclaim(folio))
+			folio_clear_reclaim(folio);
 #ifdef CONFIG_BLOCK
 		if (!spd)
 			spd = __set_page_dirty_buffers;
 #endif
-		return (*spd)(page);
+		return (*spd)(&folio->page);
 	}
-	if (!PageDirty(page)) {
-		if (!TestSetPageDirty(page))
-			return 1;
+	if (!folio_test_dirty(folio)) {
+		if (!folio_test_set_dirty(folio))
+			return true;
 	}
-	return 0;
+	return false;
+}
+EXPORT_SYMBOL(folio_mark_dirty);
+
+bool set_page_dirty(struct page *page)
+{
+	return folio_mark_dirty(page_folio(page));
 }
 EXPORT_SYMBOL(set_page_dirty);
 
@@ -2706,61 +2779,67 @@ int set_page_dirty_lock(struct page *page)
 EXPORT_SYMBOL(set_page_dirty_lock);
 
 /*
- * This cancels just the dirty bit on the kernel page itself, it does NOT
+ * This cancels just the dirty bit on the kernel folio itself, it does NOT
  * actually remove dirty bits on any mmap's that may be around. It also
- * leaves the page tagged dirty, so any sync activity will still find it on
- * the dirty lists, and in particular, clear_page_dirty_for_io() will still
+ * leaves the folio tagged dirty, so any sync activity will still find it on
+ * the dirty lists, and in particular, folio_clear_dirty_for_io() will still
  * look at the dirty bits in the VM.
  *
- * Doing this should *normally* only ever be done when a page is truncated,
+ * Doing this should *normally* only ever be done when a folio is truncated,
  * and is not actually mapped anywhere at all. However, fs/buffer.c does
  * this when it notices that somebody has cleaned out all the buffers on a
- * page without actually doing it through the VM. Can you say "ext3 is
+ * folio without actually doing it through the VM. Can you say "ext3 is
  * horribly ugly"? Thought you could.
  */
-void __cancel_dirty_page(struct page *page)
+void __folio_cancel_dirty(struct folio *folio)
 {
-	struct address_space *mapping = page_mapping(page);
+	struct address_space *mapping = folio_mapping(folio);
 
 	if (mapping_cap_account_dirty(mapping)) {
 		struct inode *inode = mapping->host;
 		struct bdi_writeback *wb;
 		struct wb_lock_cookie cookie = {};
 
-		lock_page_memcg(page);
+		folio_memcg_lock(folio);
 		wb = unlocked_inode_to_wb_begin(inode, &cookie);
 
-		if (TestClearPageDirty(page))
-			account_page_cleaned(page, mapping, wb);
+		if (folio_test_clear_dirty(folio))
+			account_page_cleaned(&folio->page, mapping, wb);
 
 		unlocked_inode_to_wb_end(inode, &cookie);
-		unlock_page_memcg(page);
+		folio_memcg_unlock(folio);
 	} else {
-		ClearPageDirty(page);
+		folio_clear_dirty(folio);
 	}
+}
+EXPORT_SYMBOL(__folio_cancel_dirty);
+
+void __cancel_dirty_page(struct page *page)
+{
+	__folio_cancel_dirty(page_folio(page));
 }
 EXPORT_SYMBOL(__cancel_dirty_page);
 
 /*
- * Clear a page's dirty flag, while caring for dirty memory accounting.
- * Returns true if the page was previously dirty.
+ * Clear a folio's dirty flag, while caring for dirty memory accounting.
+ * Returns true if the folio was previously dirty.
  *
- * This is for preparing to put the page under writeout.  We leave the page
- * tagged as dirty in the xarray so that a concurrent write-for-sync
- * can discover it via a PAGECACHE_TAG_DIRTY walk.  The ->writepage
- * implementation will run either set_page_writeback() or set_page_dirty(),
- * at which stage we bring the page's dirty flag and xarray dirty tag
- * back into sync.
+ * This is for preparing to put the folio under writeout.  We leave
+ * the folio tagged as dirty in the xarray so that a concurrent
+ * write-for-sync can discover it via a PAGECACHE_TAG_DIRTY walk.
+ * The ->writepage implementation will run either folio_start_writeback()
+ * or folio_mark_dirty(), at which stage we bring the folio's dirty flag
+ * and xarray dirty tag back into sync.
  *
- * This incoherency between the page's dirty flag and xarray tag is
- * unfortunate, but it only exists while the page is locked.
+ * This incoherency between the folio's dirty flag and xarray tag is
+ * unfortunate, but it only exists while the folio is locked.
  */
-int clear_page_dirty_for_io(struct page *page)
+bool folio_clear_dirty_for_io(struct folio *folio)
 {
-	struct address_space *mapping = page_mapping(page);
-	int ret = 0;
+	struct address_space *mapping = folio_mapping(folio);
+	bool ret = false;
 
-	BUG_ON(!PageLocked(page));
+	BUG_ON(!folio_test_locked(folio));
 
 	if (mapping && mapping_cap_account_dirty(mapping)) {
 		struct inode *inode = mapping->host;
@@ -2773,46 +2852,58 @@ int clear_page_dirty_for_io(struct page *page)
 		 * We use this sequence to make sure that
 		 *  (a) we account for dirty stats properly
 		 *  (b) we tell the low-level filesystem to
-		 *      mark the whole page dirty if it was
+		 *      mark the whole folio dirty if it was
 		 *      dirty in a pagetable. Only to then
-		 *  (c) clean the page again and return 1 to
+		 *  (c) clean the folio again and return 1 to
 		 *      cause the writeback.
 		 *
 		 * This way we avoid all nasty races with the
 		 * dirty bit in multiple places and clearing
 		 * them concurrently from different threads.
 		 *
-		 * Note! Normally the "set_page_dirty(page)"
+		 * Note! Normally the "folio_mark_dirty(folio)"
 		 * has no effect on the actual dirty bit - since
 		 * that will already usually be set. But we
 		 * need the side effects, and it can help us
 		 * avoid races.
 		 *
-		 * We basically use the page "master dirty bit"
+		 * We basically use the folio "master dirty bit"
 		 * as a serialization point for all the different
 		 * threads doing their things.
 		 */
-		if (page_mkclean(page))
-			set_page_dirty(page);
+		if (page_mkclean(&folio->page))
+			folio_mark_dirty(folio);
 		/*
 		 * We carefully synchronise fault handlers against
-		 * installing a dirty pte and marking the page dirty
+		 * installing a dirty pte and marking the folio dirty
 		 * at this point.  We do this by having them hold the
-		 * page lock while dirtying the page, and pages are
+		 * page lock while dirtying the folio, and folios are
 		 * always locked coming in here, so we get the desired
 		 * exclusion.
 		 */
 		wb = unlocked_inode_to_wb_begin(inode, &cookie);
-		if (TestClearPageDirty(page)) {
-			dec_lruvec_page_state(page, NR_FILE_DIRTY);
-			dec_zone_page_state(page, NR_ZONE_WRITE_PENDING);
+		if (folio_test_clear_dirty(folio)) {
+			lruvec_stat_mod_folio(folio, NR_FILE_DIRTY, -1);
+			zone_stat_mod_folio(folio, NR_ZONE_WRITE_PENDING, -1);
 			dec_wb_stat(wb, WB_RECLAIMABLE);
-			ret = 1;
+			ret = true;
 		}
 		unlocked_inode_to_wb_end(inode, &cookie);
 		return ret;
 	}
-	return TestClearPageDirty(page);
+	return folio_test_clear_dirty(folio);
+}
+EXPORT_SYMBOL(folio_clear_dirty_for_io);
+
+/*
+ * Clear a page's dirty flag, while caring for dirty memory accounting.
+ * Returns true if the page was previously dirty.
+ *
+ * Ours-vintage wrapper around folio_clear_dirty_for_io().
+ */
+bool clear_page_dirty_for_io(struct page *page)
+{
+	return folio_clear_dirty_for_io(page_folio(page));
 }
 EXPORT_SYMBOL(clear_page_dirty_for_io);
 
