@@ -23,6 +23,26 @@ static inline int page_is_file_cache(struct page *page)
 	return !PageSwapBacked(page);
 }
 
+/**
+ * folio_is_file_lru - Should the folio be on a file LRU or anon LRU?
+ * @folio: The folio to test.
+ *
+ * We would like to get this info without a page flag, but the state
+ * needs to survive until the folio is last deleted from the LRU, which
+ * could be as far down as __page_cache_release.
+ *
+ * Return: An integer (not a boolean!) used to sort a folio onto the
+ * right LRU list and to account folios correctly.
+ * 1 if @folio is a regular filesystem backed page cache folio
+ * or a lazily freed anonymous folio (e.g. via MADV_FREE).
+ * 0 if @folio is a normal anonymous folio, a tmpfs folio or otherwise
+ * ram or swap backed folio.
+ */
+static inline int folio_is_file_lru(struct folio *folio)
+{
+	return !folio_test_swapbacked(folio);
+}
+
 static __always_inline void __update_lru_size(struct lruvec *lruvec,
 				enum lru_list lru, enum zone_type zid,
 				long nr_pages)
@@ -39,7 +59,7 @@ static __always_inline void __update_lru_size(struct lruvec *lruvec,
 
 static __always_inline void update_lru_size(struct lruvec *lruvec,
 				enum lru_list lru, enum zone_type zid,
-				int nr_pages)
+				long nr_pages)
 {
 	__update_lru_size(lruvec, lru, zid, nr_pages);
 #ifdef CONFIG_MEMCG
@@ -63,44 +83,53 @@ static inline enum lru_list page_lru_base_type(struct page *page)
 }
 
 /**
- * __clear_page_lru_flags - clear page lru flags before releasing a page
- * @page: the page that was on lru and now has a zero reference
+ * __folio_clear_lru_flags - Clear page lru flags before releasing a page.
+ * @folio: The folio that was on lru and now has a zero reference
  */
-static __always_inline void __clear_page_lru_flags(struct page *page)
+static __always_inline void __folio_clear_lru_flags(struct folio *folio)
 {
-	VM_BUG_ON_PAGE(!PageLRU(page), page);
+	VM_BUG_ON_FOLIO(!folio_test_lru(folio), folio);
 
-	__ClearPageLRU(page);
+	__folio_clear_lru(folio);
 
 	/* this shouldn't happen, so leave the flags to bad_page() */
-	if (PageActive(page) && PageUnevictable(page))
+	if (folio_test_active(folio) && folio_test_unevictable(folio))
 		return;
 
-	__ClearPageActive(page);
-	__ClearPageUnevictable(page);
+	__folio_clear_active(folio);
+	__folio_clear_unevictable(folio);
+}
+
+static __always_inline void __clear_page_lru_flags(struct page *page)
+{
+	__folio_clear_lru_flags(page_folio(page));
 }
 
 /**
- * page_lru - which LRU list should a page be on?
- * @page: the page to test
- *
- * Returns the LRU list a page should be on, as an index
+ * folio_lru_list - Which LRU list should a folio be on?
+ * @folio: The folio to test
+ * Return: The LRU list a folio should be on, as an index
  * into the array of LRU lists.
  */
-static __always_inline enum lru_list page_lru(struct page *page)
+static __always_inline enum lru_list folio_lru_list(struct folio *folio)
 {
 	enum lru_list lru;
 
-	VM_BUG_ON_PAGE(PageActive(page) && PageUnevictable(page), page);
+	VM_BUG_ON_FOLIO(folio_test_active(folio) && folio_test_unevictable(folio), folio);
 
-	if (PageUnevictable(page))
+	if (folio_test_unevictable(folio))
 		lru = LRU_UNEVICTABLE;
 	else {
-		lru = page_lru_base_type(page);
-		if (PageActive(page))
+		lru = folio_is_file_lru(folio) ? LRU_INACTIVE_FILE : LRU_INACTIVE_ANON;
+		if (folio_test_active(folio))
 			lru += LRU_ACTIVE;
 	}
 	return lru;
+}
+
+static __always_inline enum lru_list page_lru(struct page *page)
+{
+	return folio_lru_list(page_folio(page));
 }
 
 #ifdef CONFIG_LRU_GEN
@@ -313,28 +342,50 @@ static inline bool lru_gen_del_page(struct lruvec *lruvec, struct page *page, bo
 
 #endif /* CONFIG_LRU_GEN */
 
+static __always_inline
+void lruvec_add_folio(struct lruvec *lruvec, struct folio *folio)
+{
+	enum lru_list lru = folio_lru_list(folio);
+
+	update_lru_size(lruvec, lru, folio_zonenum(folio),
+			folio_nr_pages(folio));
+	list_add(&folio->lru, &lruvec->lists[lru]);
+}
+
 static __always_inline void add_page_to_lru_list(struct page *page,
 				struct lruvec *lruvec)
 {
-	enum lru_list lru = page_lru(page);
-
 	if (lru_gen_add_page(lruvec, page, false))
 		return;
 
-	update_lru_size(lruvec, lru, page_zonenum(page), hpage_nr_pages(page));
-	list_add(&page->lru, &lruvec->lists[lru]);
+	lruvec_add_folio(lruvec, page_folio(page));
+}
+
+static __always_inline
+void lruvec_add_folio_tail(struct lruvec *lruvec, struct folio *folio)
+{
+	enum lru_list lru = folio_lru_list(folio);
+
+	update_lru_size(lruvec, lru, folio_zonenum(folio),
+			folio_nr_pages(folio));
+	list_add_tail(&folio->lru, &lruvec->lists[lru]);
 }
 
 static __always_inline void add_page_to_lru_list_tail(struct page *page,
 				struct lruvec *lruvec)
 {
-	enum lru_list lru = page_lru(page);
-
 	if (lru_gen_add_page(lruvec, page, true))
 		return;
 
-	update_lru_size(lruvec, lru, page_zonenum(page), hpage_nr_pages(page));
-	list_add_tail(&page->lru, &lruvec->lists[lru]);
+	lruvec_add_folio_tail(lruvec, page_folio(page));
+}
+
+static __always_inline
+void lruvec_del_folio(struct lruvec *lruvec, struct folio *folio)
+{
+	list_del(&folio->lru);
+	update_lru_size(lruvec, folio_lru_list(folio), folio_zonenum(folio),
+			-folio_nr_pages(folio));
 }
 
 static __always_inline void del_page_from_lru_list(struct page *page,
@@ -343,9 +394,7 @@ static __always_inline void del_page_from_lru_list(struct page *page,
 	if (lru_gen_del_page(lruvec, page, false))
 		return;
 
-	list_del(&page->lru);
-	update_lru_size(lruvec, page_lru(page), page_zonenum(page),
-			-hpage_nr_pages(page));
+	lruvec_del_folio(lruvec, page_folio(page));
 }
 
 #endif

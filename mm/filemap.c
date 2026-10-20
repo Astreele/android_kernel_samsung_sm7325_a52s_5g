@@ -1534,8 +1534,6 @@ EXPORT_SYMBOL(unlock_page);
  */
 void folio_end_writeback(struct folio *folio)
 {
-	struct page *page = &folio->page;
-
 	/*
 	 * TestClearPageReclaim could be used here but it is an atomic
 	 * operation and overkill in this particular case. Failing to
@@ -1543,9 +1541,9 @@ void folio_end_writeback(struct folio *folio)
 	 * justify taking an atomic operation penalty at the end of
 	 * every folio writeback.
 	 */
-	if (PageReclaim(page)) {
-		ClearPageReclaim(page);
-		rotate_reclaimable_page(page);
+	if (folio_test_reclaim(folio)) {
+		folio_clear_reclaim(folio);
+		folio_rotate_reclaimable(folio);
 	}
 
 	/*
@@ -1559,7 +1557,7 @@ void folio_end_writeback(struct folio *folio)
 		BUG();
 
 	smp_mb__after_atomic();
-	wake_up_page(page, PG_writeback);
+	wake_up_page(&folio->page, PG_writeback);
 	folio_put(folio);
 }
 EXPORT_SYMBOL(folio_end_writeback);

@@ -241,24 +241,31 @@ static void pagevec_move_tail(struct pagevec *pvec)
 }
 
 /*
- * Writeback is about to end against a page which has been marked for immediate
- * reclaim.  If it still appears to be reclaimable, move it to the tail of the
- * inactive list.
+ * Writeback is about to end against a folio which has been marked for
+ * immediate reclaim.  If it still appears to be reclaimable, move it
+ * to the tail of the inactive list.
  */
-void rotate_reclaimable_page(struct page *page)
+void folio_rotate_reclaimable(struct folio *folio)
 {
-	if (!PageLocked(page) && !PageDirty(page) &&
-	    !PageUnevictable(page) && PageLRU(page)) {
+	struct page *page = &folio->page;
+
+	if (!folio_test_locked(folio) && !folio_test_dirty(folio) &&
+	    !folio_test_unevictable(folio) && folio_test_lru(folio)) {
 		struct pagevec *pvec;
 		unsigned long flags;
 
-		get_page(page);
+		folio_get(folio);
 		local_irq_save(flags);
 		pvec = this_cpu_ptr(&lru_rotate_pvecs);
 		if (!pagevec_add(pvec, page) || PageCompound(page))
 			pagevec_move_tail(pvec);
 		local_irq_restore(flags);
 	}
+}
+
+void rotate_reclaimable_page(struct page *page)
+{
+	folio_rotate_reclaimable(page_folio(page));
 }
 
 static void update_page_reclaim_stat(struct lruvec *lruvec,
@@ -330,26 +337,26 @@ void activate_page(struct page *page)
 }
 #endif
 
-static void __lru_cache_activate_page(struct page *page)
+static void __lru_cache_activate_folio(struct folio *folio)
 {
 	struct pagevec *pvec = &get_cpu_var(lru_add_pvec);
 	int i;
 
 	/*
-	 * Search backwards on the optimistic assumption that the page being
+	 * Search backwards on the optimistic assumption that the folio being
 	 * activated has just been added to this pagevec. Note that only
-	 * the local pagevec is examined as a !PageLRU page could be in the
+	 * the local pagevec is examined as a !LRU folio could be in the
 	 * process of being released, reclaimed, migrated or on a remote
 	 * pagevec that is currently being drained. Furthermore, marking
-	 * a remote pagevec's page PageActive potentially hits a race where
-	 * a page is marked PageActive just after it is added to the inactive
+	 * a remote pagevec's folio PageActive potentially hits a race where
+	 * a folio is marked PageActive just after it is added to the inactive
 	 * list causing accounting errors and BUG_ON checks to trigger.
 	 */
 	for (i = pagevec_count(pvec) - 1; i >= 0; i--) {
 		struct page *pagevec_page = pvec->pages[i];
 
-		if (pagevec_page == page) {
-			SetPageActive(page);
+		if (pagevec_page == &folio->page) {
+			folio_set_active(folio);
 			break;
 		}
 	}
@@ -402,36 +409,41 @@ static void page_inc_refs(struct page *page)
  * When a newly allocated page is not yet visible, so safe for non-atomic ops,
  * __SetPageReferenced(page) may be substituted for mark_page_accessed(page).
  */
-void mark_page_accessed(struct page *page)
+void folio_mark_accessed(struct folio *folio)
 {
-	page = compound_head(page);
+	struct page *page = &folio->page;
 
 	if (lru_gen_enabled()) {
 		page_inc_refs(page);
 		return;
 	}
 
-	if (!PageActive(page) && !PageUnevictable(page) &&
-			PageReferenced(page)) {
-
+	if (!folio_test_active(folio) && !folio_test_unevictable(folio) &&
+			folio_test_referenced(folio)) {
 		/*
-		 * If the page is on the LRU, queue it for activation via
-		 * activate_page_pvecs. Otherwise, assume the page is on a
+		 * If the folio is on the LRU, queue it for activation via
+		 * activate_page_pvecs. Otherwise, assume the folio is on a
 		 * pagevec, mark it active and it'll be moved to the active
 		 * LRU on the next drain.
 		 */
-		if (PageLRU(page))
+		if (folio_test_lru(folio))
 			activate_page(page);
 		else
-			__lru_cache_activate_page(page);
-		ClearPageReferenced(page);
+			__lru_cache_activate_folio(folio);
+		folio_clear_referenced(folio);
 		if (page_is_file_cache(page))
 			workingset_activation(page);
-	} else if (!PageReferenced(page)) {
-		SetPageReferenced(page);
+	} else if (!folio_test_referenced(folio)) {
+		folio_set_referenced(folio);
 	}
-	if (page_is_idle(page))
-		clear_page_idle(page);
+	if (folio_test_idle(folio))
+		folio_clear_idle(folio);
+}
+EXPORT_SYMBOL(folio_mark_accessed);
+
+void mark_page_accessed(struct page *page)
+{
+	folio_mark_accessed(page_folio(page));
 }
 EXPORT_SYMBOL(mark_page_accessed);
 
@@ -487,7 +499,27 @@ void lru_cache_add(struct page *page)
 }
 
 /**
- * lru_cache_add_active_or_unevictable
+ * folio_add_lru - Add a folio to an LRU list.
+ * @folio: The folio to be added to the LRU.
+ *
+ * Queue the folio for addition to the LRU. The decision on whether
+ * to add the folio to the [in]active [file|anon] list is deferred until the
+ * pagevec is drained. This gives a chance for the caller of folio_add_lru()
+ * have the folio added to the active list using folio_mark_accessed().
+ */
+void folio_add_lru(struct folio *folio)
+{
+	VM_BUG_ON_FOLIO(folio_test_active(folio) && folio_test_unevictable(folio), folio);
+	VM_BUG_ON_FOLIO(folio_test_lru(folio), folio);
+
+	/* see the comment in lru_gen_add_page() */
+	if (lru_gen_enabled() && !folio_test_unevictable(folio) &&
+	    lru_gen_in_fault() && !(current->flags & PF_MEMALLOC))
+		folio_set_active(folio);
+
+	__lru_cache_add(&folio->page);
+}
+EXPORT_SYMBOL(folio_add_lru);
  * @page:  the page to be added to LRU
  * @vma:   vma in which page is mapped for determining reclaimability
  *
