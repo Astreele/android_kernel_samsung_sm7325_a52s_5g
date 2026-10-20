@@ -562,9 +562,21 @@ static inline pgoff_t linear_page_index(struct vm_area_struct *vma,
 
 extern void __lock_page(struct page *page);
 extern int __lock_page_killable(struct page *page);
-extern int __lock_page_or_retry(struct page *page, struct mm_struct *mm,
+void __folio_lock(struct folio *folio);
+void __folio_lock_killable(struct folio *folio);
+int __lock_page_or_retry(struct page *page, struct mm_struct *mm,
+				unsigned int flags);
+bool __folio_lock_or_retry(struct folio *folio, struct mm_struct *mm,
 				unsigned int flags);
 extern void unlock_page(struct page *page);
+
+/*
+ * Return true if the folio was successfully locked
+ */
+static inline bool folio_trylock(struct folio *folio)
+{
+	return likely(!test_and_set_bit_lock(PG_locked, folio_flags(folio, 0)));
+}
 
 /*
  * Return true if the page was successfully locked
@@ -573,6 +585,30 @@ static inline int trylock_page(struct page *page)
 {
 	page = compound_head(page);
 	return (likely(!test_and_set_bit_lock(PG_locked, &page->flags)));
+}
+
+/*
+ * folio_lock may only be called if we have the folio's
+ * inode pinned.
+ */
+static inline void folio_lock(struct folio *folio)
+{
+	might_sleep();
+	if (!folio_trylock(folio))
+		__folio_lock(folio);
+}
+
+/*
+ * folio_lock_killable is like folio_lock, but can be interrupted by fatal
+ * signals.  It returns 0 if it locked the folio and -EINTR if it was
+ * killed while waiting.
+ */
+static inline int folio_lock_killable(struct folio *folio)
+{
+	might_sleep();
+	if (!folio_trylock(folio))
+		return __folio_lock_killable(folio);
+	return 0;
 }
 
 /*
@@ -599,11 +635,8 @@ static inline int lock_page_killable(struct page *page)
 }
 
 /*
- * lock_page_or_retry - Lock the page, unless this would block and the
- * caller indicated that it can handle a retry.
- *
  * Return value and mmap_sem implications depend on flags; see
- * __lock_page_or_retry().
+ * __folio_lock_or_retry().
  */
 static inline int lock_page_or_retry(struct page *page, struct mm_struct *mm,
 				     unsigned int flags)
@@ -612,12 +645,52 @@ static inline int lock_page_or_retry(struct page *page, struct mm_struct *mm,
 	return trylock_page(page) || __lock_page_or_retry(page, mm, flags);
 }
 
+/**
+ * folio_lock_or_retry - Lock the folio, unless this would block.
+ * @folio: The folio to lock.
+ * @mm: The faulting task's memory map.
+ * @flags: Fault method flags.
+ *
+ * Locking may only be performed if we have the folio's inode pinned.
+ *
+ * Returns true if the folio is locked; false if we were blocked and
+ * the caller should retry.
+ */
+static inline bool folio_lock_or_retry(struct folio *folio,
+		struct mm_struct *mm, unsigned int flags)
+{
+	might_sleep();
+	return folio_trylock(folio) || __folio_lock_or_retry(folio, mm, flags);
+}
+
 /*
- * This is exported only for wait_on_page_locked/wait_on_page_writeback, etc.,
+ * This is exported only for folio_wait_locked/folio_wait_writeback, etc.,
  * and should not be used directly.
  */
 extern void wait_on_page_bit(struct page *page, int bit_nr);
 extern int wait_on_page_bit_killable(struct page *page, int bit_nr);
+void folio_wait_bit(struct folio *folio, int bit_nr);
+int folio_wait_bit_killable(struct folio *folio, int bit_nr);
+
+/**
+ * folio_wait_locked - Wait for a folio to be unlocked.
+ * @folio: The folio.
+ *
+ * If the folio is currently being written back to disk, you might
+ * want to wait for writeback instead.
+ */
+static inline void folio_wait_locked(struct folio *folio)
+{
+	if (folio_test_locked(folio))
+		folio_wait_bit(folio, PG_locked);
+}
+
+static inline int folio_wait_locked_killable(struct folio *folio)
+{
+	if (!folio_test_locked(folio))
+		return 0;
+	return folio_wait_bit_killable(folio, PG_locked);
+}
 
 /* 
  * Wait for a page to be unlocked.

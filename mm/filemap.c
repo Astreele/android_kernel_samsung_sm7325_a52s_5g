@@ -1242,16 +1242,16 @@ enum behavior {
 };
 
 /*
- * Attempt to check (or get) the page bit, and mark us done
+ * Attempt to check (or get) the folio flag, and mark us done
  * if successful.
  */
-static inline bool trylock_page_bit_common(struct page *page, int bit_nr,
+static inline bool folio_trylock_flag(struct folio *folio, int bit_nr,
 					struct wait_queue_entry *wait)
 {
 	if (wait->flags & WQ_FLAG_EXCLUSIVE) {
-		if (test_and_set_bit(bit_nr, &page->flags))
+		if (test_and_set_bit(bit_nr, &folio->flags))
 			return false;
-	} else if (test_bit(bit_nr, &page->flags))
+	} else if (test_bit(bit_nr, &folio->flags))
 		return false;
 
 	wait->flags |= WQ_FLAG_WOKEN | WQ_FLAG_DONE;
@@ -1261,8 +1261,8 @@ static inline bool trylock_page_bit_common(struct page *page, int bit_nr,
 /* How many times do we accept lock stealing from under a waiter? */
 int sysctl_page_lock_unfairness = 5;
 
-static inline int wait_on_page_bit_common(wait_queue_head_t *q,
-	struct page *page, int bit_nr, int state, enum behavior behavior)
+static inline int folio_wait_bit_common(struct folio *folio, int bit_nr,
+		int state, enum behavior behavior)
 {
 	int unfairness = sysctl_page_lock_unfairness;
 	struct wait_page_queue wait_page;
@@ -1270,10 +1270,12 @@ static inline int wait_on_page_bit_common(wait_queue_head_t *q,
 	bool thrashing = false;
 	bool delayacct = false;
 	unsigned long pflags;
+	wait_queue_head_t *q;
 
+	q = page_waitqueue(&folio->page);
 	if (bit_nr == PG_locked &&
-	    !PageUptodate(page) && PageWorkingset(page)) {
-		if (!PageSwapBacked(page)) {
+	    !folio_test_uptodate(folio) && folio_test_workingset(folio)) {
+		if (!folio_test_swapbacked(folio)) {
 			delayacct_thrashing_start();
 			delayacct = true;
 		}
@@ -1283,7 +1285,7 @@ static inline int wait_on_page_bit_common(wait_queue_head_t *q,
 
 	init_wait(wait);
 	wait->func = wake_page_function;
-	wait_page.page = page;
+	wait_page.page = &folio->page;
 	wait_page.bit_nr = bit_nr;
 
 repeat:
@@ -1309,8 +1311,8 @@ repeat:
 	 * lock to avoid races.
 	 */
 	spin_lock_irq(&q->lock);
-	SetPageWaiters(page);
-	if (!trylock_page_bit_common(page, bit_nr, wait))
+	folio_set_waiters(folio);
+	if (!folio_trylock_flag(folio, bit_nr, wait))
 		__add_wait_queue_entry_tail(q, wait);
 	spin_unlock_irq(&q->lock);
 
@@ -1320,10 +1322,10 @@ repeat:
 	 * see whether the page bit testing has already
 	 * been done by the wake function.
 	 *
-	 * We can drop our reference to the page.
+	 * We can drop our reference to the folio.
 	 */
 	if (behavior == DROP)
-		put_page(page);
+		folio_put(folio);
 
 	/*
 	 * Note that until the "finish_wait()", or until
@@ -1360,7 +1362,7 @@ repeat:
 		 *
 		 * And if that fails, we'll have to retry this all.
 		 */
-		if (unlikely(test_and_set_bit(bit_nr, &page->flags)))
+		if (unlikely(test_and_set_bit(bit_nr, folio_flags(folio, 0))))
 			goto repeat;
 
 		wait->flags |= WQ_FLAG_DONE;
@@ -1400,17 +1402,27 @@ repeat:
 	return wait->flags & WQ_FLAG_WOKEN ? 0 : -EINTR;
 }
 
+void folio_wait_bit(struct folio *folio, int bit_nr)
+{
+	folio_wait_bit_common(folio, bit_nr, TASK_UNINTERRUPTIBLE, SHARED);
+}
+EXPORT_SYMBOL(folio_wait_bit);
+
+int folio_wait_bit_killable(struct folio *folio, int bit_nr)
+{
+	return folio_wait_bit_common(folio, bit_nr, TASK_KILLABLE, SHARED);
+}
+EXPORT_SYMBOL(folio_wait_bit_killable);
+
 void wait_on_page_bit(struct page *page, int bit_nr)
 {
-	wait_queue_head_t *q = page_waitqueue(page);
-	wait_on_page_bit_common(q, page, bit_nr, TASK_UNINTERRUPTIBLE, SHARED);
+	folio_wait_bit(page_folio(page), bit_nr);
 }
 EXPORT_SYMBOL(wait_on_page_bit);
 
 int wait_on_page_bit_killable(struct page *page, int bit_nr)
 {
-	wait_queue_head_t *q = page_waitqueue(page);
-	return wait_on_page_bit_common(q, page, bit_nr, TASK_KILLABLE, SHARED);
+	return folio_wait_bit_killable(page_folio(page), bit_nr);
 }
 EXPORT_SYMBOL(wait_on_page_bit_killable);
 
@@ -1426,11 +1438,8 @@ EXPORT_SYMBOL(wait_on_page_bit_killable);
  */
 void put_and_wait_on_page_locked(struct page *page)
 {
-	wait_queue_head_t *q;
-
-	page = compound_head(page);
-	q = page_waitqueue(page);
-	wait_on_page_bit_common(q, page, PG_locked, TASK_UNINTERRUPTIBLE, DROP);
+	folio_wait_bit_common(page_folio(page), PG_locked,
+			TASK_UNINTERRUPTIBLE, DROP);
 }
 
 /**
@@ -1490,13 +1499,28 @@ static inline bool clear_bit_unlock_is_negative_byte(long nr, volatile void *mem
  * portably (architectures that do LL/SC can test any bit, while x86 can
  * test the sign bit).
  */
+/**
+ * folio_unlock - Unlock a locked folio.
+ * @folio: The folio.
+ *
+ * Unlocks the folio and wakes up any thread sleeping on the page lock.
+ *
+ * Context: May be called from interrupt or process context.  May not be
+ * called from NMI context.
+ */
+void folio_unlock(struct folio *folio)
+{
+	/* Bit 7 allows x86 to check the byte's sign bit */
+	BUILD_BUG_ON(PG_waiters != 7);
+	VM_BUG_ON_FOLIO(!folio_test_locked(folio), folio);
+	if (clear_bit_unlock_is_negative_byte(PG_locked, folio_flags(folio, 0)))
+		wake_up_page_bit(&folio->page, PG_locked);
+}
+EXPORT_SYMBOL(folio_unlock);
+
 void unlock_page(struct page *page)
 {
-	BUILD_BUG_ON(PG_waiters != 7);
-	page = compound_head(page);
-	VM_BUG_ON_PAGE(!PageLocked(page), page);
-	if (clear_bit_unlock_is_negative_byte(PG_locked, &page->flags))
-		wake_up_page_bit(page, PG_locked);
+	return folio_unlock(page_folio(page));
 }
 EXPORT_SYMBOL(unlock_page);
 
@@ -1568,63 +1592,82 @@ EXPORT_SYMBOL_GPL(page_endio);
  */
 void __lock_page(struct page *__page)
 {
-	struct page *page = compound_head(__page);
-	wait_queue_head_t *q = page_waitqueue(page);
-	wait_on_page_bit_common(q, page, PG_locked, TASK_UNINTERRUPTIBLE,
-				EXCLUSIVE);
+	folio_wait_bit_common(page_folio(__page), PG_locked,
+			TASK_UNINTERRUPTIBLE, EXCLUSIVE);
 }
 EXPORT_SYMBOL(__lock_page);
 
 int __lock_page_killable(struct page *__page)
 {
-	struct page *page = compound_head(__page);
-	wait_queue_head_t *q = page_waitqueue(page);
-	return wait_on_page_bit_common(q, page, PG_locked, TASK_KILLABLE,
-					EXCLUSIVE);
+	return folio_wait_bit_common(page_folio(__page), PG_locked,
+			TASK_KILLABLE, EXCLUSIVE);
 }
 EXPORT_SYMBOL_GPL(__lock_page_killable);
 
+/**
+ * __folio_lock - Get a lock on the folio, assuming we need to sleep to get it.
+ * @folio: Folio to lock
+ */
+void __folio_lock(struct folio *folio)
+{
+	folio_wait_bit_common(folio, PG_locked, TASK_UNINTERRUPTIBLE, EXCLUSIVE);
+}
+EXPORT_SYMBOL(__folio_lock);
+
+int __folio_lock_killable(struct folio *folio)
+{
+	return folio_wait_bit_common(folio, PG_locked, TASK_KILLABLE,
+			EXCLUSIVE);
+}
+EXPORT_SYMBOL_GPL(__folio_lock_killable);
+
 /*
  * Return values:
- * 1 - page is locked; mmap_sem is still held.
- * 0 - page is not locked.
+ * true - folio is locked; mmap_sem is still held.
+ * false - folio is not locked.
  *     mmap_sem has been released (up_read()), unless flags had both
  *     FAULT_FLAG_ALLOW_RETRY and FAULT_FLAG_RETRY_NOWAIT set, in
  *     which case mmap_sem is still held.
  *
- * If neither ALLOW_RETRY nor KILLABLE are set, will always return 1
- * with the page locked and the mmap_sem unperturbed.
+ * If neither ALLOW_RETRY nor KILLABLE are set, will always return true
+ * with the folio locked and the mmap_sem unperturbed.
  */
-int __lock_page_or_retry(struct page *page, struct mm_struct *mm,
+bool __folio_lock_or_retry(struct folio *folio, struct mm_struct *mm,
 			 unsigned int flags)
 {
 	if (flags & FAULT_FLAG_ALLOW_RETRY) {
 		/*
 		 * CAUTION! In this case, mmap_sem is not released
-		 * even though return 0.
+		 * even though return false.
 		 */
 		if (flags & FAULT_FLAG_RETRY_NOWAIT)
-			return 0;
+			return false;
 
 		up_read(&mm->mmap_sem);
 		if (flags & FAULT_FLAG_KILLABLE)
-			wait_on_page_locked_killable(page);
+			folio_wait_locked_killable(folio);
 		else
-			wait_on_page_locked(page);
-		return 0;
+			folio_wait_locked(folio);
+		return false;
 	} else {
 		if (flags & FAULT_FLAG_KILLABLE) {
-			int ret;
+			bool ret;
 
-			ret = __lock_page_killable(page);
+			ret = __folio_lock_killable(folio);
 			if (ret) {
 				up_read(&mm->mmap_sem);
-				return 0;
+				return false;
 			}
 		} else
-			__lock_page(page);
-		return 1;
+			__folio_lock(folio);
+		return true;
 	}
+}
+
+int __lock_page_or_retry(struct page *page, struct mm_struct *mm,
+			 unsigned int flags)
+{
+	return __folio_lock_or_retry(page_folio(page), mm, flags);
 }
 
 /**
