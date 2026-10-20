@@ -418,10 +418,11 @@ static void __write_boundary_block(struct block_device *bdev,
 #define sdfat_buffer_heads_over_limit	(0)
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 19, 0)
-#define page_folio(p)	(p)
-#endif
-
+/*
+ * ours carries include/linux/page-flags.h's page_folio() since the folio
+ * ground; sdfat's buffer-head arms here speak plain struct page, so the
+ * callsite below passes the page directly now.
+ */
 static void clean_buffers(struct page *page, unsigned int first_unmapped)
 {
 	unsigned int buffer_counter = 0;
@@ -446,7 +447,7 @@ static void clean_buffers(struct page *page, unsigned int first_unmapped)
 	 */
 
 	if (sdfat_buffer_heads_over_limit && PageUptodate(page))
-		try_to_free_buffers(page_folio(page));
+		try_to_free_buffers(page);
 }
 
 static int sdfat_mpage_writepage(struct page *page,
