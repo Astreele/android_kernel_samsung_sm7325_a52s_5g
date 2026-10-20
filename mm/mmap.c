@@ -605,6 +605,15 @@ inline int vma_expand(struct ma_state *mas, struct vm_area_struct *vma,
 	if (mas_preallocate(mas, vma, GFP_KERNEL))
 		goto nomem;
 
+	/*
+	 * Mark the vmas as being mutated so that any speculative
+	 * page fault taking an interest in either of them retries.
+	 * Matched by vma_has_changed()/handle_speculative_fault().
+	 */
+	vm_write_begin(vma);
+	if (remove_next)
+		vm_write_begin(next);
+
 	vma_adjust_trans_huge(vma, start, end, 0);
 
 	if (file) {
@@ -646,6 +655,8 @@ inline int vma_expand(struct ma_state *mas, struct vm_area_struct *vma,
 		flush_dcache_mmap_unlock(mapping);
 	}
 
+	vm_write_end(vma);
+
 	/* Expanding over the next vma */
 	if (remove_next && file) {
 		__remove_shared_vm_struct(next, file, mapping);
@@ -671,15 +682,13 @@ again:
 		smp_wmb();
 		RB_CLEAR_NODE(&next->vm_rb);
 #endif
-		if (file) {
+		if (file)
 			uprobe_munmap(next, next->vm_start, next->vm_end);
-			fput(file);
-		}
 		if (next->anon_vma)
 			anon_vma_merge(vma, next);
 		mm->map_count--;
-		mpol_put(vma_policy(next));
-		vm_area_free(next);
+		vm_write_end(next);
+		put_vma(next);
 	}
 
 	validate_mm(mm);
