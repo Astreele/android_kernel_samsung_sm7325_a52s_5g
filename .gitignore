@@ -162,3 +162,6 @@ arch/arm/boot/dts/vendor
 
 # generated flashable kernel .zip file at root directory
 /*.zip
+
+# CI workflows: re-include .github (the .* rule above would ignore it)
+!.github/
